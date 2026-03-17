@@ -1,0 +1,18 @@
+{
+  "name": "options-monitor",
+  "version": "1.0.0",
+  "description": "Options trading strategy monitoring tool",
+  "type": "module",
+  "scripts": {
+    "monitor": "tsx src/index.ts",
+    "build": "tsc",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=monitor.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "esbuild": "^0.20.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}
