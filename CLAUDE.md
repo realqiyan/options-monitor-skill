@@ -19,6 +19,8 @@ npm run build      # TypeScript compile check
 npm run bundle     # Rebuild monitor.mjs from source
 ```
 
+**Note:** Pre-commit hook auto-runs `npm run bundle` when `.ts` files change.
+
 ## Architecture
 
 **Data Flow:**
@@ -30,6 +32,7 @@ fetchAllStrategies() → filter auto_trade=true → fetchStrategyDetailAndOrders
 **Key Modules:**
 - `fetcher.ts` - Wraps `mcporter call options-trade.<tool>` CLI commands
 - `report.ts` - Builds StrategyStatus, checks stop-loss, generates text output
+- `rules.ts` - Strategy rules analysis (delta, expiration, position adjustments)
 - `types.ts` - Strategy, Order, OptionPosition, StopLossAlert interfaces
 - `monitor.mjs` - Bundled single-file executable
 
