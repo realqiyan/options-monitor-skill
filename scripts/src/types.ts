@@ -1,55 +1,46 @@
-// Types for options-monitor-skill
+// Types for options-monitor-skill based on OPTIONS_QUERY_TOOLS.md
 
 // Strategy from queryAllStrategy
 export interface Strategy {
-  id: string
-  owner: string
   strategyId: string
   strategyName: string
   strategyCode: 'cc_strategy' | 'wheel_strategy' | 'default'
-  stage: string
+  stage: string // running=运行中、suspend=暂停
   startTime: string
   code: string // Stock code like BABA, JD
   lotSize: number
-  status: number
+  status: number // 1=启用，0=禁用
   ext: {
     auto_trade?: string
     need_evaluate?: string
     initial_stock_num?: string
     initial_stock_cost?: string
     wheel_sellput_strike_price?: string
+    target_delta?: string
   }
 }
 
 // Response from queryAllStrategy
 export interface AllStrategyResponse {
-  allStrategy: Strategy[]
+  data: Strategy[]
 }
 
 // Strategy summary from queryStrategyDetailAndOrders
 export interface StrategySummary {
-  strategy: Strategy
-  optionsStrategy: {
-    id: string
-    owner: string
-    code: string
-    title: string
-    type: number
-    status: number
-  }
-  strategyDelta: number // Total delta including stock
-  optionsDelta: number
+  strategyDelta: number // 策略总体Delta
+  optionsDelta: number // 策略总体Options Delta
   optionsGamma: number
   optionsTheta: number
-  openOptionsQuantity: number
+  openOptionsQuantity: number // 未平仓期权合约数
   openOptionsCallQuantity: number
   openOptionsPutQuantity: number
-  avgDelta: number // Normalized delta
+  avgDelta: number // 策略平均每股Delta
   totalFee: number
-  allOptionsIncome: number
-  allIncome: number
+  allOptionsIncome: number // 期权总收益(已扣除手续费)
+  allIncome: number // 策略所有交易总收益
   unrealizedOptionsIncome: number
-  holdStockNum: number
+  holdStockNum: number // 持有股票数
+  holdStockCost: number // 持有股票成本价
   holdStockProfit: number
   totalStockCost: number
   averageStockCost: number
@@ -59,68 +50,44 @@ export interface StrategySummary {
 
 // Order from queryStrategyDetailAndOrders
 export interface Order {
-  id: string
-  createTime: string
-  updateTime: string
-  strategyId: string
-  underlyingCode: string
-  code: string // Option code like BABA260220C180000
-  market: number // 1=HK, 11=US
-  tradeTime: string
-  strikeTime: string // Expiration date
-  side: number // 1=buy, 2=sell, 3=sell to open, 4=buy to close
+  code: string // 证券代码
+  market: number // 市场代码
+  side: number // 订单方向
   price: number
-  orderFee: number
   quantity: number
+  orderFee: number
+  tradeTime: string
+  strikeTime: string // 行权时间
+  status: string // 订单状态（全部已成、已撤销等）
+  groupId: string
   tradeFrom: string
   subOrder: boolean
-  status: number // 11=filled
-  owner: string
-  platformOrderId: string
-  platformOrderIdEx: string
-  platformFillId: string
   ext: {
     lotSize?: string
     lastSyncStatus?: string
-    isClose?: string
-    codeType?: string // CALL or PUT
+    isClose?: string // "true" for closed orders
+    codeType?: string // "PUT", "CALL", "STOCK"
     totalIncome?: string
-    curDTE?: string
+    curDTE?: string // Current DTE, can be negative for expired
     strikePrice?: string
+    isPut?: string
     isCall?: string
   }
 }
 
+// Order group info
+export interface OrderGroup {
+  totalIncome: number
+  totalOrderFee: number
+  orderCount: number
+}
+
 // Response from queryStrategyDetailAndOrders
 export interface StrategyDetailResponse {
-  includeStrategyRule: boolean
-  strategySummary: StrategySummary
+  data: Strategy
+  summary: StrategySummary
   orders: Order[]
-}
-
-// Position from queryAllPosition
-export interface Position {
-  owner: string
-  securityCode: string
-  market: number
-  securityName: string
-  quantity: number // Negative for sold options
-  canSellQty: number
-  costPrice: number
-  currentPrice: number
-}
-
-// Response from queryAllPosition
-export interface AllPositionResponse {
-  positions: Position[]
-}
-
-// Stock price from queryStockRealPrice
-export interface StockPriceResponse {
-  code: string
-  market: number
-  price: number
-  // Additional fields may exist
+  orderGroups: Record<string, OrderGroup>
 }
 
 // Option position with calculated metrics

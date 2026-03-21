@@ -10,7 +10,6 @@ import {
   OptionPosition,
   Strategy,
   StrategyDetailResponse,
-  Position,
   STOP_LOSS_THRESHOLDS,
 } from './types.js'
 
@@ -176,29 +175,44 @@ export function checkStopLoss(
 
 /**
  * Build option position from order data
+ * Uses orderGroups to calculate cost price
  */
 export function buildOptionPositionFromOrder(
   order: StrategyDetailResponse['orders'][0],
-  positions: Position[]
+  orderGroups: Record<string, { totalIncome: number; totalOrderFee: number; orderCount: number }>
 ): OptionPosition | null {
-  // Skip closed orders (isClose=true in ext)
+  // Skip closed orders
   if (order.ext?.isClose === 'true') {
     return null
   }
 
-  // Find matching position for current price
-  const matchingPosition = positions.find((p) => p.securityCode === order.code)
+  // Skip stock orders
+  if (order.ext?.codeType === 'STOCK') {
+    return null
+  }
 
   // Side: 1=buy, 2=sell, 3=sell to open, 4=buy to close
   // For simplicity: 2 or 3 = SELL (sell to open), 1 or 4 = BUY
   const direction = order.side === 2 || order.side === 3 ? 'SELL' : 'BUY'
 
-  const currentPrice = matchingPosition?.currentPrice || order.price
+  // Get order group info for cost calculation
+  const groupInfo = orderGroups[order.groupId]
+  const avgPrice = groupInfo && groupInfo.orderCount > 0
+    ? Math.abs(groupInfo.totalIncome) / (order.quantity * 100) // Approximate per-contract price
+    : order.price
 
-  // Parse option code to extract strike price and type
-  const isCall = order.code.includes('C') && !order.code.includes('P')
-  const strikeMatch = order.code.match(/(\d+)$/)
-  const strikePrice = strikeMatch ? parseInt(strikeMatch[1]) / 1000 : 0
+  // Use ext data for option info
+  const isCall = order.ext?.codeType === 'CALL'
+  const isPut = order.ext?.codeType === 'PUT' || order.ext?.isPut === 'true'
+  const strikePrice = order.ext?.strikePrice ? parseFloat(order.ext.strikePrice) : 0
+
+  // Use curDTE from ext if available, otherwise calculate
+  let dte: number
+  if (order.ext?.curDTE !== undefined) {
+    dte = parseInt(order.ext.curDTE)
+  } else {
+    dte = calculateDTE(order.strikeTime)
+  }
 
   return {
     code: order.code,
@@ -206,12 +220,12 @@ export function buildOptionPositionFromOrder(
     contracts: order.quantity,
     delta: 0,
     theta: 0,
-    dte: calculateDTE(order.strikeTime),
-    currentPrice,
-    costPrice: order.price,
+    dte,
+    currentPrice: avgPrice, // Will be updated if we have position data
+    costPrice: avgPrice,
     strikePrice,
-    isCall,
-    status: order.status,
+    isCall: isCall || (!isPut && order.code.includes('C') && !order.code.includes('P')),
+    status: 0,
   }
 }
 
@@ -220,38 +234,34 @@ export function buildOptionPositionFromOrder(
  */
 export function buildStrategyStatus(
   strategy: Strategy,
-  detail: StrategyDetailResponse,
-  positions: Position[]
+  detail: StrategyDetailResponse
 ): StrategyStatus {
-  const summary = detail.strategySummary
+  const summary = detail.summary
+  const strategyData = detail.data
 
   // Build option positions from strategy's open orders
-  // Each strategy has its own orders, so we use those
   const options: OptionPosition[] = []
   const seenCodes = new Set<string>()
 
   for (const order of detail.orders) {
-    // Skip closed orders
-    if (order.ext?.isClose === 'true') continue
-
     // Skip already seen codes (deduplicate)
     if (seenCodes.has(order.code)) continue
     seenCodes.add(order.code)
 
-    const optPos = buildOptionPositionFromOrder(order, positions)
-    if (optPos && optPos.contracts > 0) {
+    const optPos = buildOptionPositionFromOrder(order, detail.orderGroups)
+    if (optPos) {
       options.push(optPos)
     }
   }
 
   return {
-    strategyId: strategy.strategyId,
-    strategyName: strategy.strategyName,
-    strategyCode: strategy.strategyCode,
-    stockCode: strategy.code,
+    strategyId: strategyData.strategyId,
+    strategyName: strategyData.strategyName,
+    strategyCode: strategyData.strategyCode,
+    stockCode: strategyData.code,
     stockPrice: summary.currentStockPrice,
     holdStockNum: summary.holdStockNum,
-    lotSize: strategy.lotSize,
+    lotSize: strategyData.lotSize,
     normalizedDelta: summary.avgDelta,
     optionsDelta: summary.optionsDelta,
     optionsTheta: summary.optionsTheta,

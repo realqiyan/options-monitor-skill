@@ -18,14 +18,10 @@ function executeMcporter(toolName, params = {}) {
 }
 async function fetchAllStrategies() {
   const response = executeMcporter("queryAllStrategy");
-  return response.allStrategy || [];
+  return response.data || [];
 }
 async function fetchStrategyDetailAndOrders(strategyId) {
   return executeMcporter("queryStrategyDetailAndOrders", { strategyId });
-}
-async function fetchAllPositions() {
-  const response = executeMcporter("queryAllPosition");
-  return response.positions || [];
 }
 
 // src/report.ts
@@ -137,53 +133,62 @@ function checkStopLoss(strategyId, strategyName, position) {
   }
   return null;
 }
-function buildOptionPositionFromOrder(order, positions) {
+function buildOptionPositionFromOrder(order, orderGroups) {
   if (order.ext?.isClose === "true") {
     return null;
   }
-  const matchingPosition = positions.find((p) => p.securityCode === order.code);
+  if (order.ext?.codeType === "STOCK") {
+    return null;
+  }
   const direction = order.side === 2 || order.side === 3 ? "SELL" : "BUY";
-  const currentPrice = matchingPosition?.currentPrice || order.price;
-  const isCall = order.code.includes("C") && !order.code.includes("P");
-  const strikeMatch = order.code.match(/(\d+)$/);
-  const strikePrice = strikeMatch ? parseInt(strikeMatch[1]) / 1e3 : 0;
+  const groupInfo = orderGroups[order.groupId];
+  const avgPrice = groupInfo && groupInfo.orderCount > 0 ? Math.abs(groupInfo.totalIncome) / (order.quantity * 100) : order.price;
+  const isCall = order.ext?.codeType === "CALL";
+  const isPut = order.ext?.codeType === "PUT" || order.ext?.isPut === "true";
+  const strikePrice = order.ext?.strikePrice ? parseFloat(order.ext.strikePrice) : 0;
+  let dte;
+  if (order.ext?.curDTE !== void 0) {
+    dte = parseInt(order.ext.curDTE);
+  } else {
+    dte = calculateDTE(order.strikeTime);
+  }
   return {
     code: order.code,
     direction,
     contracts: order.quantity,
     delta: 0,
     theta: 0,
-    dte: calculateDTE(order.strikeTime),
-    currentPrice,
-    costPrice: order.price,
+    dte,
+    currentPrice: avgPrice,
+    // Will be updated if we have position data
+    costPrice: avgPrice,
     strikePrice,
-    isCall,
-    status: order.status
+    isCall: isCall || !isPut && order.code.includes("C") && !order.code.includes("P"),
+    status: 0
   };
 }
-function buildStrategyStatus(strategy, detail, positions) {
-  const summary = detail.strategySummary;
+function buildStrategyStatus(strategy, detail) {
+  const summary = detail.summary;
+  const strategyData = detail.data;
   const options = [];
   const seenCodes = /* @__PURE__ */ new Set();
   for (const order of detail.orders) {
-    if (order.ext?.isClose === "true")
-      continue;
     if (seenCodes.has(order.code))
       continue;
     seenCodes.add(order.code);
-    const optPos = buildOptionPositionFromOrder(order, positions);
-    if (optPos && optPos.contracts > 0) {
+    const optPos = buildOptionPositionFromOrder(order, detail.orderGroups);
+    if (optPos) {
       options.push(optPos);
     }
   }
   return {
-    strategyId: strategy.strategyId,
-    strategyName: strategy.strategyName,
-    strategyCode: strategy.strategyCode,
-    stockCode: strategy.code,
+    strategyId: strategyData.strategyId,
+    strategyName: strategyData.strategyName,
+    strategyCode: strategyData.strategyCode,
+    stockCode: strategyData.code,
     stockPrice: summary.currentStockPrice,
     holdStockNum: summary.holdStockNum,
-    lotSize: strategy.lotSize,
+    lotSize: strategyData.lotSize,
     normalizedDelta: summary.avgDelta,
     optionsDelta: summary.optionsDelta,
     optionsTheta: summary.optionsTheta,
@@ -290,17 +295,11 @@ async function monitor() {
     );
     console.log(`\u627E\u5230 ${allStrategies.length} \u4E2A\u7B56\u7565\uFF0C\u5176\u4E2D ${autoTradeStrategies.length} \u4E2A\u5F00\u542F\u81EA\u52A8\u4EA4\u6613
 `);
-    let allPositions = [];
-    try {
-      allPositions = await fetchAllPositions();
-    } catch (error) {
-      fetchErrors.push("\u83B7\u53D6\u6301\u4ED3\u5217\u8868\u5931\u8D25");
-    }
     for (const strategy of autoTradeStrategies) {
       console.log(`\u5904\u7406\u7B56\u7565: ${strategy.strategyName}...`);
       try {
         const detail = await fetchStrategyDetailAndOrders(strategy.strategyId);
-        const status = buildStrategyStatus(strategy, detail, allPositions);
+        const status = buildStrategyStatus(strategy, detail);
         strategies.push(status);
         for (const option of status.options) {
           const alert = checkStopLoss(

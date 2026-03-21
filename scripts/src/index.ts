@@ -4,7 +4,6 @@
 import {
   fetchAllStrategies,
   fetchStrategyDetailAndOrders,
-  fetchAllPositions,
 } from './fetcher.js'
 import {
   buildStrategyStatus,
@@ -13,7 +12,7 @@ import {
   writeReportToFile,
   printReportSummary,
 } from './report.js'
-import { StrategyStatus, StopLossAlert, Position } from './types.js'
+import { StrategyStatus, StopLossAlert } from './types.js'
 
 /**
  * Main monitoring function
@@ -34,21 +33,13 @@ async function monitor(): Promise<void> {
     )
     console.log(`找到 ${allStrategies.length} 个策略，其中 ${autoTradeStrategies.length} 个开启自动交易\n`)
 
-    // Fetch all positions for reference
-    let allPositions: Position[] = []
-    try {
-      allPositions = await fetchAllPositions()
-    } catch (error) {
-      fetchErrors.push('获取持仓列表失败')
-    }
-
     // Process each auto-trade strategy
     for (const strategy of autoTradeStrategies) {
       console.log(`处理策略: ${strategy.strategyName}...`)
 
       try {
         const detail = await fetchStrategyDetailAndOrders(strategy.strategyId)
-        const status = buildStrategyStatus(strategy, detail, allPositions)
+        const status = buildStrategyStatus(strategy, detail)
         strategies.push(status)
 
         // Check for stop loss alerts on options

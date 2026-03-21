@@ -4,10 +4,7 @@ import { execSync } from 'child_process'
 import {
   AllStrategyResponse,
   StrategyDetailResponse,
-  AllPositionResponse,
-  StockPriceResponse,
   Strategy,
-  Position,
 } from './types.js'
 
 /**
@@ -37,7 +34,7 @@ function executeMcporter(toolName: string, params: Record<string, string | numbe
  */
 export async function fetchAllStrategies(): Promise<Strategy[]> {
   const response = executeMcporter('queryAllStrategy') as AllStrategyResponse
-  return response.allStrategy || []
+  return response.data || []
 }
 
 /**
@@ -50,29 +47,9 @@ export async function fetchStrategyDetailAndOrders(
 }
 
 /**
- * Fetch all positions
- */
-export async function fetchAllPositions(): Promise<Position[]> {
-  const response = executeMcporter('queryAllPosition') as AllPositionResponse
-  return response.positions || []
-}
-
-/**
- * Fetch stock real-time price
- */
-export async function fetchStockPrice(code: string, market: number): Promise<number> {
-  try {
-    const response = executeMcporter('queryStockRealPrice', { code, market }) as StockPriceResponse
-    return response.price || 0
-  } catch {
-    return 0
-  }
-}
-
-/**
  * Get market code from strategy
  */
-export function getMarketCode(strategy: Strategy): number {
+export function getMarketCode(_strategy: Strategy): number {
   // All strategies are US stocks based on the data
   return 11
 }
