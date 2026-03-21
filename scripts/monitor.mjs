@@ -37,18 +37,128 @@ var STOP_LOSS_THRESHOLDS = {
   // Sell option rises 100%
 };
 
-// src/report.ts
-var __filename = fileURLToPath(import.meta.url);
-var __dirname = dirname(__filename);
-var OUTPUT_DIR = join(__dirname, "..", "output");
-function getOutputFile() {
-  return join(OUTPUT_DIR, "latest-report.txt");
+// src/rules.ts
+function analyzeCCStrategyDelta(currentDelta, minDTE) {
+  const WEEKS_3_DAYS = 21;
+  if (minDTE <= WEEKS_3_DAYS) {
+    if (currentDelta > 0.25 && currentDelta < 0.75) {
+      const targetDelta = currentDelta > 0.5 ? currentDelta - 0.1 : currentDelta + 0.1;
+      return {
+        strategyCode: "cc_strategy",
+        currentDelta,
+        targetDelta: Math.round(targetDelta * 100) / 100,
+        needsAdjustment: true,
+        reason: `DTE=${minDTE}\u5929<=3\u5468\uFF0C\u9700\u8C03\u6574delta\u54110.5\u9760\u8FD1`
+      };
+    }
+  }
+  if (currentDelta >= 0.75) {
+    return {
+      strategyCode: "cc_strategy",
+      currentDelta,
+      targetDelta: 0.5,
+      needsAdjustment: true,
+      reason: `Delta=${currentDelta.toFixed(2)}>=0.75\uFF0C\u9700\u5411\u4E0B\u8C03\u6574\u81F30.5`
+    };
+  }
+  if (currentDelta <= 0.25) {
+    const targetDelta = Math.max(currentDelta + 0.1, 0.35);
+    return {
+      strategyCode: "cc_strategy",
+      currentDelta,
+      targetDelta: Math.round(targetDelta * 100) / 100,
+      needsAdjustment: true,
+      reason: `Delta=${currentDelta.toFixed(2)}<=0.25\uFF0C\u9700\u5411\u4E0A\u8C03\u6574\u81F3${targetDelta.toFixed(2)}`
+    };
+  }
+  if (minDTE <= WEEKS_3_DAYS) {
+    return {
+      strategyCode: "cc_strategy",
+      currentDelta,
+      targetDelta: null,
+      needsAdjustment: true,
+      reason: `DTE=${minDTE}\u5929<=3\u5468\uFF0C\u9700\u8003\u8651\u5C55\u671F`
+    };
+  }
+  return {
+    strategyCode: "cc_strategy",
+    currentDelta,
+    targetDelta: null,
+    needsAdjustment: false,
+    reason: `Delta\u5728\u6B63\u5E38\u533A\u95F4(0.25-0.75)`
+  };
 }
-function isITM(option, stockPrice) {
-  if (option.isCall) {
-    return stockPrice > option.strikePrice;
+function analyzeWheelStrategyDelta(currentDelta, holdStockNum) {
+  if (holdStockNum === 0) {
+    if (currentDelta > 0.35) {
+      return {
+        strategyCode: "wheel_strategy",
+        currentDelta,
+        targetDelta: null,
+        needsAdjustment: false,
+        reason: `\u5F53\u524D\u6301\u80A1=0\uFF0C\u5F00\u4ED3\u5356Put\u5EFA\u8BAEDelta 0.10-0.35`
+      };
+    }
   } else {
-    return stockPrice < option.strikePrice;
+    return {
+      strategyCode: "wheel_strategy",
+      currentDelta,
+      targetDelta: null,
+      needsAdjustment: false,
+      reason: `\u6301\u6709\u80A1\u7968${holdStockNum}\u80A1\uFF0C\u5356Call\u7B56\u7565`
+    };
+  }
+  return {
+    strategyCode: "wheel_strategy",
+    currentDelta,
+    targetDelta: null,
+    needsAdjustment: false,
+    reason: `Delta\u5728\u6B63\u5E38\u72B6\u6001`
+  };
+}
+function analyzeDefaultStrategyDelta(currentDelta) {
+  if (currentDelta < 0.15) {
+    return {
+      strategyCode: "default",
+      currentDelta,
+      targetDelta: null,
+      needsAdjustment: false,
+      reason: `Delta=${currentDelta.toFixed(2)}<0.15\uFF0C\u5356\u671F\u6743\u5EFA\u8BAEDelta 0.15-0.35`
+    };
+  }
+  if (currentDelta > 0.35) {
+    return {
+      strategyCode: "default",
+      currentDelta,
+      targetDelta: null,
+      needsAdjustment: false,
+      reason: `Delta=${currentDelta.toFixed(2)}>0.35\uFF0C\u5356\u671F\u6743\u5EFA\u8BAEDelta 0.15-0.35`
+    };
+  }
+  return {
+    strategyCode: "default",
+    currentDelta,
+    targetDelta: null,
+    needsAdjustment: false,
+    reason: `Delta\u5728\u6B63\u5E38\u533A\u95F4(0.15-0.35)`
+  };
+}
+function analyzeDeltaForStrategy(strategyCode, normalizedDelta, minDTE, holdStockNum) {
+  switch (strategyCode) {
+    case "cc_strategy":
+      return analyzeCCStrategyDelta(normalizedDelta, minDTE);
+    case "wheel_strategy":
+      return analyzeWheelStrategyDelta(normalizedDelta, holdStockNum);
+    case "default":
+      return analyzeDefaultStrategyDelta(normalizedDelta);
+    default:
+      return {
+        strategyCode,
+        currentDelta: normalizedDelta,
+        targetDelta: null,
+        needsAdjustment: false,
+        reason: `\u672A\u77E5\u7B56\u7565\u7C7B\u578B`
+      };
   }
 }
 function calculatePnL(option) {
@@ -60,11 +170,116 @@ function calculatePnL(option) {
     return (option.currentPrice - option.costPrice) / option.costPrice * 100;
   }
 }
+function isITM(option, stockPrice) {
+  if (option.isCall) {
+    return stockPrice > option.strikePrice;
+  } else {
+    return stockPrice < option.strikePrice;
+  }
+}
+function checkWheelStrategyAdjustments(strategyId, strategyName, status) {
+  const alerts = [];
+  for (const option of status.options) {
+    const pnl = calculatePnL(option);
+    const itm = isITM(option, status.stockPrice);
+    if (option.direction === "SELL" && !option.isCall) {
+      if (pnl >= 80) {
+        alerts.push({
+          strategyId,
+          strategyName,
+          strategyCode: "wheel_strategy",
+          type: "PUT_PROFIT_TAKE",
+          message: `\u5356Put\u6536\u76CA${pnl.toFixed(1)}%>=80%\uFF0C\u5EFA\u8BAE\u5E73\u4ED3`,
+          details: {
+            code: option.code,
+            pnl,
+            strikePrice: option.strikePrice
+          }
+        });
+      }
+      if (itm) {
+        alerts.push({
+          strategyId,
+          strategyName,
+          strategyCode: "wheel_strategy",
+          type: "ASSIGNMENT_RISK",
+          message: `\u5356Put\u5DF2\u4EF7\u5185(ITM)\uFF0C\u5B58\u5728\u88AB\u6307\u6D3E\u63A5\u80A1\u98CE\u9669`,
+          details: {
+            code: option.code,
+            strikePrice: option.strikePrice,
+            stockPrice: status.stockPrice
+          }
+        });
+      }
+    }
+  }
+  return alerts;
+}
+function checkCCStrategyAdjustments(strategyId, strategyName, status) {
+  const alerts = [];
+  const WEEKS_3_DAYS = 21;
+  for (const option of status.options) {
+    if (option.dte <= WEEKS_3_DAYS) {
+      alerts.push({
+        strategyId,
+        strategyName,
+        strategyCode: "cc_strategy",
+        type: "EXPIRATION_WARNING",
+        message: `\u671F\u6743DTE=${option.dte}\u5929<=3\u5468\uFF0C\u9700\u8003\u8651\u5C55\u671F\u6216\u5E73\u4ED3`,
+        details: {
+          code: option.code,
+          dte: option.dte,
+          strikePrice: option.strikePrice
+        }
+      });
+    }
+  }
+  return alerts;
+}
+function checkPositionAdjustments(strategyId, strategyName, strategyCode, status) {
+  switch (strategyCode) {
+    case "wheel_strategy":
+      return checkWheelStrategyAdjustments(strategyId, strategyName, status);
+    case "cc_strategy":
+      return checkCCStrategyAdjustments(strategyId, strategyName, status);
+    default:
+      return [];
+  }
+}
+function getMinDTE(options) {
+  if (options.length === 0)
+    return 999;
+  return Math.min(...options.map((o) => o.dte));
+}
+
+// src/report.ts
+var __filename = fileURLToPath(import.meta.url);
+var __dirname = dirname(__filename);
+var OUTPUT_DIR = join(__dirname, "..", "output");
+function getOutputFile() {
+  return join(OUTPUT_DIR, "latest-report.txt");
+}
+function isITM2(option, stockPrice) {
+  if (option.isCall) {
+    return stockPrice > option.strikePrice;
+  } else {
+    return stockPrice < option.strikePrice;
+  }
+}
+function calculatePnL2(option) {
+  if (option.costPrice <= 0)
+    return 0;
+  if (option.direction === "SELL") {
+    return (option.costPrice - option.currentPrice) / option.costPrice * 100;
+  } else {
+    return (option.currentPrice - option.costPrice) / option.costPrice * 100;
+  }
+}
 function generateOptionDiagnostics(option, stockPrice) {
   const tips = [];
-  const pnl = calculatePnL(option);
+  const pnl = calculatePnL2(option);
   const pnlSign = pnl >= 0 ? "+" : "";
-  const itm = isITM(option, stockPrice);
+  const itm = isITM2(option, stockPrice);
   const itmStatus = itm ? "\u4EF7\u5185(ITM)" : "\u4EF7\u5916(OTM)";
   tips.push(`\u{1F4C8} \u76C8\u4E8F: ${pnlSign}${pnl.toFixed(1)}% | ${itmStatus}`);
   if (option.dte <= 3) {
@@ -77,17 +292,10 @@ function generateOptionDiagnostics(option, stockPrice) {
   }
   return tips;
 }
-function analyzeDelta(normalizedDelta, strategyCode, holdStockNum) {
-  if (strategyCode === "wheel_strategy") {
-    if (holdStockNum === 0) {
-      if (normalizedDelta > 0.3) {
-        return `\u{1F4A1} Delta=${normalizedDelta.toFixed(2)} \u504F\u9AD8\uFF0C\u5356Put\u7B56\u7565\u5EFA\u8BAE Delta < 0.3`;
-      }
-    } else {
-      if (normalizedDelta < 0.5) {
-        return `\u{1F4A1} Delta=${normalizedDelta.toFixed(2)} \u504F\u4F4E\uFF0C\u5356Call\u7B56\u7565\u5EFA\u8BAE Delta > 0.5`;
-      }
-    }
+function getDeltaAnalysisMessage(strategyCode, normalizedDelta, minDTE, holdStockNum) {
+  const analysis = analyzeDeltaForStrategy(strategyCode, normalizedDelta, minDTE, holdStockNum);
+  if (analysis.needsAdjustment || analysis.reason) {
+    return `\u{1F4A1} ${analysis.reason}`;
   }
   return null;
 }
@@ -198,11 +406,12 @@ function buildStrategyStatus(strategy, detail) {
     allIncome: summary.allIncome
   };
 }
-function generateReport(strategies, alerts, noOptionsPositions, fetchErrors) {
+function generateReport(strategies, alerts, adjustmentAlerts, noOptionsPositions, fetchErrors) {
   return {
     generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
     strategies,
     alerts,
+    adjustmentAlerts,
     noOptionsPositions,
     fetchErrors
   };
@@ -217,6 +426,13 @@ function formatReportAsText(report) {
       lines.push(`    \u6210\u672C\u4EF7: ${alert.costPrice}, \u5F53\u524D\u4EF7: ${alert.currentPrice}`);
     }
   }
+  if (report.adjustmentAlerts.length > 0) {
+    lines.push("\n\u{1F4CB} \u6301\u4ED3\u8C03\u6574\u5EFA\u8BAE:");
+    for (const alert of report.adjustmentAlerts) {
+      lines.push(`  [${alert.strategyName}] ${alert.details.code || ""}`);
+      lines.push(`    ${alert.message}`);
+    }
+  }
   lines.push(`
 \u{1F4CA} \u9700\u8981Agent\u7EE7\u7EED\u5206\u6790\u7684${report.strategies.length}\u4E2A\u671F\u6743\u4EA4\u6613\u7B56\u7565:`);
   for (const strategy of report.strategies) {
@@ -225,13 +441,15 @@ function formatReportAsText(report) {
     lines.push(`    \u7B56\u7565ID: ${strategy.strategyId}`);
     lines.push(`    \u6807\u7684: ${strategy.stockCode} @ ${strategy.stockPrice.toFixed(2)}`);
     lines.push(`    Delta: \u7B56\u7565 ${strategy.normalizedDelta.toFixed(2)}, \u671F\u6743 ${strategy.optionsDelta.toFixed(2)}`);
-    const deltaTip = analyzeDelta(
-      strategy.normalizedDelta,
+    const minDTE = getMinDTE(strategy.options);
+    const deltaMsg = getDeltaAnalysisMessage(
       strategy.strategyCode,
+      strategy.normalizedDelta,
+      minDTE,
       strategy.holdStockNum
     );
-    if (deltaTip) {
-      lines.push(`    ${deltaTip}`);
+    if (deltaMsg) {
+      lines.push(`    ${deltaMsg}`);
     }
     lines.push(`    Theta: ${strategy.optionsTheta.toFixed(4)}`);
     lines.push(`    \u6301\u80A1: ${strategy.holdStockNum}, \u624B\u6570: ${strategy.lotSize}, \u671F\u6743: ${strategy.openOptionsQuantity}`);
@@ -286,6 +504,7 @@ function printReportSummary(report) {
 async function monitor() {
   const strategies = [];
   const alerts = [];
+  const adjustmentAlerts = [];
   const noOptionsPositions = [];
   const fetchErrors = [];
   try {
@@ -311,6 +530,13 @@ async function monitor() {
             alerts.push(alert);
           }
         }
+        const positionAlerts = checkPositionAdjustments(
+          strategy.strategyId,
+          strategy.strategyName,
+          status.strategyCode,
+          status
+        );
+        adjustmentAlerts.push(...positionAlerts);
         if (status.openOptionsQuantity === 0 && status.options.length === 0) {
           noOptionsPositions.push(strategy.strategyId);
         }
@@ -323,7 +549,7 @@ async function monitor() {
     const message = error instanceof Error ? error.message : String(error);
     fetchErrors.push(`\u83B7\u53D6\u7B56\u7565\u5217\u8868\u5931\u8D25: ${message}`);
   }
-  const report = generateReport(strategies, alerts, noOptionsPositions, fetchErrors);
+  const report = generateReport(strategies, alerts, adjustmentAlerts, noOptionsPositions, fetchErrors);
   writeReportToFile(report);
   printReportSummary(report);
   if (alerts.length > 0) {

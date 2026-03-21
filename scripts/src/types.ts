@@ -135,17 +135,44 @@ export interface StopLossAlert {
   changePercent: number
 }
 
+// Stop loss thresholds
+export const STOP_LOSS_THRESHOLDS = {
+  BUY_OPTION_LOSS_PERCENT: 50, // Buy option drops 50%
+  SELL_OPTION_GAIN_PERCENT: 100, // Sell option rises 100%
+}
+
+// Strategy rule from API
+export interface StrategyRule {
+  code: string
+  title: string
+  content: string
+}
+
+// Delta analysis result
+export interface DeltaAnalysis {
+  strategyCode: string
+  currentDelta: number
+  targetDelta: number | null
+  needsAdjustment: boolean
+  reason: string
+}
+
+// Position adjustment alert
+export interface PositionAdjustmentAlert {
+  strategyId: string
+  strategyName: string
+  strategyCode: string
+  type: 'DELTA_ADJUSTMENT' | 'EXPIRATION_WARNING' | 'PUT_PROFIT_TAKE' | 'ASSIGNMENT_RISK'
+  message: string
+  details: Record<string, unknown>
+}
+
 // Monitoring report output
 export interface MonitoringReport {
   generatedAt: string
   strategies: StrategyStatus[]
   alerts: StopLossAlert[]
-  noOptionsPositions: string[] // Strategy IDs with no open options
+  adjustmentAlerts: PositionAdjustmentAlert[]
+  noOptionsPositions: string[]
   fetchErrors: string[]
-}
-
-// Stop loss thresholds
-export const STOP_LOSS_THRESHOLDS = {
-  BUY_OPTION_LOSS_PERCENT: 50, // Buy option drops 50%
-  SELL_OPTION_GAIN_PERCENT: 100, // Sell option rises 100%
 }

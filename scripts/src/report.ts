@@ -10,8 +10,14 @@ import {
   OptionPosition,
   Strategy,
   StrategyDetailResponse,
+  PositionAdjustmentAlert,
   STOP_LOSS_THRESHOLDS,
 } from './types.js'
+import {
+  analyzeDeltaForStrategy,
+  checkPositionAdjustments,
+  getMinDTE,
+} from './rules.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -87,7 +93,8 @@ export function generateOptionDiagnostics(
 }
 
 /**
- * Analyze Delta for wheel strategy
+ * Analyze Delta for wheel strategy (legacy - kept for compatibility)
+ * @deprecated Use analyzeDeltaForStrategy from rules.ts instead
  */
 export function analyzeDelta(
   normalizedDelta: number,
@@ -107,6 +114,22 @@ export function analyzeDelta(
         return `💡 Delta=${normalizedDelta.toFixed(2)} 偏低，卖Call策略建议 Delta > 0.5`
       }
     }
+  }
+  return null
+}
+
+/**
+ * Get delta analysis message for report
+ */
+export function getDeltaAnalysisMessage(
+  strategyCode: string,
+  normalizedDelta: number,
+  minDTE: number,
+  holdStockNum: number
+): string | null {
+  const analysis = analyzeDeltaForStrategy(strategyCode, normalizedDelta, minDTE, holdStockNum)
+  if (analysis.needsAdjustment || analysis.reason) {
+    return `💡 ${analysis.reason}`
   }
   return null
 }
@@ -278,6 +301,7 @@ export function buildStrategyStatus(
 export function generateReport(
   strategies: StrategyStatus[],
   alerts: StopLossAlert[],
+  adjustmentAlerts: PositionAdjustmentAlert[],
   noOptionsPositions: string[],
   fetchErrors: string[]
 ): MonitoringReport {
@@ -285,6 +309,7 @@ export function generateReport(
     generatedAt: new Date().toISOString(),
     strategies,
     alerts,
+    adjustmentAlerts,
     noOptionsPositions,
     fetchErrors,
   }
@@ -306,6 +331,15 @@ export function formatReportAsText(report: MonitoringReport): string {
     }
   }
 
+  // Print adjustment alerts
+  if (report.adjustmentAlerts.length > 0) {
+    lines.push('\n📋 持仓调整建议:')
+    for (const alert of report.adjustmentAlerts) {
+      lines.push(`  [${alert.strategyName}] ${alert.details.code || ''}`)
+      lines.push(`    ${alert.message}`)
+    }
+  }
+
   // Print strategies
   lines.push(`\n📊 需要Agent继续分析的${report.strategies.length}个期权交易策略:`)
   for (const strategy of report.strategies) {
@@ -314,14 +348,16 @@ export function formatReportAsText(report: MonitoringReport): string {
     lines.push(`    标的: ${strategy.stockCode} @ ${strategy.stockPrice.toFixed(2)}`)
     lines.push(`    Delta: 策略 ${strategy.normalizedDelta.toFixed(2)}, 期权 ${strategy.optionsDelta.toFixed(2)}`)
 
-    // Delta analysis
-    const deltaTip = analyzeDelta(
-      strategy.normalizedDelta,
+    // Delta analysis with rules
+    const minDTE = getMinDTE(strategy.options)
+    const deltaMsg = getDeltaAnalysisMessage(
       strategy.strategyCode,
+      strategy.normalizedDelta,
+      minDTE,
       strategy.holdStockNum
     )
-    if (deltaTip) {
-      lines.push(`    ${deltaTip}`)
+    if (deltaMsg) {
+      lines.push(`    ${deltaMsg}`)
     }
 
     lines.push(`    Theta: ${strategy.optionsTheta.toFixed(4)}`)

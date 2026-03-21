@@ -12,7 +12,8 @@ import {
   writeReportToFile,
   printReportSummary,
 } from './report.js'
-import { StrategyStatus, StopLossAlert } from './types.js'
+import { checkPositionAdjustments } from './rules.js'
+import { StrategyStatus, StopLossAlert, PositionAdjustmentAlert } from './types.js'
 
 /**
  * Main monitoring function
@@ -20,6 +21,7 @@ import { StrategyStatus, StopLossAlert } from './types.js'
 async function monitor(): Promise<void> {
   const strategies: StrategyStatus[] = []
   const alerts: StopLossAlert[] = []
+  const adjustmentAlerts: PositionAdjustmentAlert[] = []
   const noOptionsPositions: string[] = []
   const fetchErrors: string[] = []
 
@@ -54,6 +56,15 @@ async function monitor(): Promise<void> {
           }
         }
 
+        // Check for position adjustment alerts
+        const positionAlerts = checkPositionAdjustments(
+          strategy.strategyId,
+          strategy.strategyName,
+          status.strategyCode,
+          status
+        )
+        adjustmentAlerts.push(...positionAlerts)
+
         // Check if no open options
         if (status.openOptionsQuantity === 0 && status.options.length === 0) {
           noOptionsPositions.push(strategy.strategyId)
@@ -69,7 +80,7 @@ async function monitor(): Promise<void> {
   }
 
   // Generate and output report
-  const report = generateReport(strategies, alerts, noOptionsPositions, fetchErrors)
+  const report = generateReport(strategies, alerts, adjustmentAlerts, noOptionsPositions, fetchErrors)
 
   // Write to file
   writeReportToFile(report)
