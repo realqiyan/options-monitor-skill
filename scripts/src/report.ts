@@ -343,13 +343,23 @@ export function formatReportAsText(report: MonitoringReport): string {
   // Print strategies
   lines.push(`\n📊 需要Agent继续分析的${report.strategies.length}个期权交易策略:`)
   for (const strategy of report.strategies) {
-    lines.push(`\n  ${strategy.strategyName} (${strategy.strategyCode})`)
+    // Get adjustment status
+    const minDTE = getMinDTE(strategy.options)
+    const analysis = analyzeDeltaForStrategy(
+      strategy.strategyCode,
+      strategy.normalizedDelta,
+      minDTE,
+      strategy.holdStockNum
+    )
+    const statusIcon = analysis.needsAdjustment ? '⚠️' : '✅'
+    const statusText = analysis.needsAdjustment ? '需调整' : '正常'
+
+    lines.push(`\n  ${strategy.strategyName} (${strategy.strategyCode}) [${statusIcon} ${statusText}]`)
     lines.push(`    策略ID: ${strategy.strategyId}`)
     lines.push(`    标的: ${strategy.stockCode} @ ${strategy.stockPrice.toFixed(2)}`)
     lines.push(`    Delta: 策略 ${strategy.normalizedDelta.toFixed(2)}, 期权 ${strategy.optionsDelta.toFixed(2)}`)
 
     // Delta analysis with rules
-    const minDTE = getMinDTE(strategy.options)
     const deltaMsg = getDeltaAnalysisMessage(
       strategy.strategyCode,
       strategy.normalizedDelta,

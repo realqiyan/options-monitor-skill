@@ -436,12 +436,20 @@ function formatReportAsText(report) {
   lines.push(`
 \u{1F4CA} \u9700\u8981Agent\u7EE7\u7EED\u5206\u6790\u7684${report.strategies.length}\u4E2A\u671F\u6743\u4EA4\u6613\u7B56\u7565:`);
   for (const strategy of report.strategies) {
+    const minDTE = getMinDTE(strategy.options);
+    const analysis = analyzeDeltaForStrategy(
+      strategy.strategyCode,
+      strategy.normalizedDelta,
+      minDTE,
+      strategy.holdStockNum
+    );
+    const statusIcon = analysis.needsAdjustment ? "\u26A0\uFE0F" : "\u2705";
+    const statusText = analysis.needsAdjustment ? "\u9700\u8C03\u6574" : "\u6B63\u5E38";
     lines.push(`
-  ${strategy.strategyName} (${strategy.strategyCode})`);
+  ${strategy.strategyName} (${strategy.strategyCode}) [${statusIcon} ${statusText}]`);
     lines.push(`    \u7B56\u7565ID: ${strategy.strategyId}`);
     lines.push(`    \u6807\u7684: ${strategy.stockCode} @ ${strategy.stockPrice.toFixed(2)}`);
     lines.push(`    Delta: \u7B56\u7565 ${strategy.normalizedDelta.toFixed(2)}, \u671F\u6743 ${strategy.optionsDelta.toFixed(2)}`);
-    const minDTE = getMinDTE(strategy.options);
     const deltaMsg = getDeltaAnalysisMessage(
       strategy.strategyCode,
       strategy.normalizedDelta,
