@@ -351,8 +351,27 @@ export function formatReportAsText(report: MonitoringReport): string {
       minDTE,
       strategy.holdStockNum
     )
-    const statusIcon = analysis.needsAdjustment ? '⚠️' : '✅'
-    const statusText = analysis.needsAdjustment ? '需调整' : '正常'
+
+    // Check if strategy needs attention
+    // 1. Delta needs adjustment
+    // 2. Has adjustment alerts (assignment risk, expiration warning, etc.)
+    // 3. Has options near expiration (DTE <= 7)
+    // 4. Has ITM sold options (assignment risk)
+    const hasAdjustmentAlert = report.adjustmentAlerts.some(
+      a => a.strategyId === strategy.strategyId
+    )
+    const hasNearExpiration = strategy.options.some(o => o.dte <= 7)
+    const hasITMSoldOption = strategy.options.some(
+      o => o.direction === 'SELL' && isITM(o, strategy.stockPrice)
+    )
+
+    const needsAttention = analysis.needsAdjustment ||
+      hasAdjustmentAlert ||
+      hasNearExpiration ||
+      hasITMSoldOption
+
+    const statusIcon = needsAttention ? '⚠️' : '✅'
+    const statusText = needsAttention ? '关注' : '正常'
 
     lines.push(`\n  ${strategy.strategyName} (${strategy.strategyCode}) [${statusIcon} ${statusText}]`)
     lines.push(`    策略ID: ${strategy.strategyId}`)

@@ -443,8 +443,16 @@ function formatReportAsText(report) {
       minDTE,
       strategy.holdStockNum
     );
-    const statusIcon = analysis.needsAdjustment ? "\u26A0\uFE0F" : "\u2705";
-    const statusText = analysis.needsAdjustment ? "\u9700\u8C03\u6574" : "\u6B63\u5E38";
+    const hasAdjustmentAlert = report.adjustmentAlerts.some(
+      (a) => a.strategyId === strategy.strategyId
+    );
+    const hasNearExpiration = strategy.options.some((o) => o.dte <= 7);
+    const hasITMSoldOption = strategy.options.some(
+      (o) => o.direction === "SELL" && isITM2(o, strategy.stockPrice)
+    );
+    const needsAttention = analysis.needsAdjustment || hasAdjustmentAlert || hasNearExpiration || hasITMSoldOption;
+    const statusIcon = needsAttention ? "\u26A0\uFE0F" : "\u2705";
+    const statusText = needsAttention ? "\u5173\u6CE8" : "\u6B63\u5E38";
     lines.push(`
   ${strategy.strategyName} (${strategy.strategyCode}) [${statusIcon} ${statusText}]`);
     lines.push(`    \u7B56\u7565ID: ${strategy.strategyId}`);
