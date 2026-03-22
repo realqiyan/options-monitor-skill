@@ -9,17 +9,15 @@ Options trading strategy monitoring skill. Fetches automated options trading pos
 ## Development Commands
 
 ```bash
-# Run monitor (recommended)
-node scripts/monitor.mjs
+# Run monitor
+options-monitor
 
 # Development mode
 cd scripts && npm install
-npm run monitor    # tsx src/index.ts
+npm run monitor    # tsx src/index.ts (dev)
 npm run build      # TypeScript compile check
-npm run bundle     # Rebuild monitor.mjs from source
+npm run bundle     # Rebuild monitor.mjs from source (required after .ts changes)
 ```
-
-**Note:** Pre-commit hook auto-runs `npm run bundle` when `.ts` files change.
 
 ## Architecture
 

@@ -9,8 +9,7 @@
   "scripts": {
     "monitor": "tsx src/index.ts",
     "build": "tsc",
-    "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=monitor.mjs",
-    "postinstall": "cp ../scripts/hooks/pre-commit ../.git/hooks/pre-commit 2>/dev/null || true"
+    "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=monitor.mjs"
   },
   "dependencies": {},
   "devDependencies": {
