@@ -1,0 +1,17 @@
+#!/bin/bash
+# Pre-commit hook: auto bundle monitor.mjs when source files change
+
+# Check if any .ts files in src/ are staged
+if git diff --cached --name-only | grep -q "scripts/src/.*\.ts$"; then
+  echo "📝 Source files changed, running bundle..."
+  cd scripts && npm run bundle
+  if [ $? -ne 0 ]; then
+    echo "❌ Bundle failed, aborting commit"
+    exit 1
+  fi
+  # Add the bundled file to commit
+  git add monitor.mjs
+  echo "✅ Bundle complete, monitor.mjs added to commit"
+fi
+
+exit 0
