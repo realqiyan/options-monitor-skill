@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Options trading strategy monitoring tool",
   "type": "module",
+  "bin": {
+    "options-monitor": "./monitor.mjs"
+  },
   "scripts": {
     "monitor": "tsx src/index.ts",
     "build": "tsc",
