@@ -342,15 +342,14 @@ function checkStopLoss(strategyId, strategyName, position) {
   return null;
 }
 function buildOptionPositionFromOrder(order, orderGroups) {
-  if (order.ext?.isClose === "true") {
+  if (order.isOpen !== "\u672A\u5E73\u4ED3") {
     return null;
   }
   if (order.ext?.codeType === "STOCK") {
     return null;
   }
   const direction = order.side === 2 || order.side === 3 ? "SELL" : "BUY";
-  const groupInfo = orderGroups[order.groupId];
-  const avgPrice = groupInfo && groupInfo.orderCount > 0 ? Math.abs(groupInfo.totalIncome) / (order.quantity * 100) : order.price;
+  const avgPrice = order.groupTotalIncome != null ? Math.abs(order.groupTotalIncome) / (order.quantity * 100) : orderGroups?.[order.groupId] ? Math.abs(orderGroups[order.groupId].totalIncome) / (order.quantity * 100) : order.price;
   const isCall = order.ext?.codeType === "CALL";
   const isPut = order.ext?.codeType === "PUT" || order.ext?.isPut === "true";
   const strikePrice = order.ext?.strikePrice ? parseFloat(order.ext.strikePrice) : 0;
@@ -401,9 +400,7 @@ function buildStrategyStatus(strategy, detail) {
     optionsDelta: summary?.optionsDelta ?? 0,
     optionsTheta: summary?.optionsTheta ?? 0,
     openOptionsQuantity: summary?.openOptionsQuantity ?? 0,
-    options,
-    allOptionsIncome: summary?.allOptionsIncome ?? 0,
-    allIncome: summary?.allIncome ?? 0
+    options
   };
 }
 function generateReport(strategies, alerts, adjustmentAlerts, noOptionsPositions, fetchErrors) {
@@ -469,7 +466,6 @@ function formatReportAsText(report) {
     }
     lines.push(`    Theta: ${strategy.optionsTheta.toFixed(4)}`);
     lines.push(`    \u6301\u80A1: ${strategy.holdStockNum}, \u624B\u6570: ${strategy.lotSize}, \u671F\u6743: ${strategy.openOptionsQuantity}`);
-    lines.push(`    \u7D2F\u8BA1\u6536\u76CA: \u671F\u6743 ${strategy.allOptionsIncome.toFixed(2)}, \u603B\u8BA1 ${strategy.allIncome.toFixed(2)}`);
     if (strategy.options.length > 0) {
       lines.push(`    \u671F\u6743\u6301\u4ED3:`);
       for (const opt of strategy.options) {

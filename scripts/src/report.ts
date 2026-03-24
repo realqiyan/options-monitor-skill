@@ -202,10 +202,11 @@ export function checkStopLoss(
  */
 export function buildOptionPositionFromOrder(
   order: StrategyDetailResponse['orders'][0],
-  orderGroups: Record<string, { totalIncome: number; totalOrderFee: number; orderCount: number }>
+  orderGroups?: Record<string, { totalIncome: number; totalOrderFee: number; orderCount: number }>
 ): OptionPosition | null {
-  // Skip closed orders
-  if (order.ext?.isClose === 'true') {
+  // Only show currently held positions (未平仓)
+  // For Roll orders: closed positions are skipped, new positions are shown
+  if (order.isOpen !== '未平仓') {
     return null
   }
 
@@ -218,11 +219,12 @@ export function buildOptionPositionFromOrder(
   // For simplicity: 2 or 3 = SELL (sell to open), 1 or 4 = BUY
   const direction = order.side === 2 || order.side === 3 ? 'SELL' : 'BUY'
 
-  // Get order group info for cost calculation
-  const groupInfo = orderGroups[order.groupId]
-  const avgPrice = groupInfo && groupInfo.orderCount > 0
-    ? Math.abs(groupInfo.totalIncome) / (order.quantity * 100) // Approximate per-contract price
-    : order.price
+  // Calculate cost price: prefer groupTotalIncome (multi-leg strategies), fallback to orderGroups
+  const avgPrice = order.groupTotalIncome != null
+    ? Math.abs(order.groupTotalIncome) / (order.quantity * 100)
+    : orderGroups?.[order.groupId]
+      ? Math.abs(orderGroups[order.groupId].totalIncome) / (order.quantity * 100)
+      : order.price
 
   // Use ext data for option info
   const isCall = order.ext?.codeType === 'CALL'
@@ -290,8 +292,6 @@ export function buildStrategyStatus(
     optionsTheta: summary?.optionsTheta ?? 0,
     openOptionsQuantity: summary?.openOptionsQuantity ?? 0,
     options,
-    allOptionsIncome: summary?.allOptionsIncome ?? 0,
-    allIncome: summary?.allIncome ?? 0,
   }
 }
 
@@ -391,7 +391,6 @@ export function formatReportAsText(report: MonitoringReport): string {
 
     lines.push(`    Theta: ${strategy.optionsTheta.toFixed(4)}`)
     lines.push(`    持股: ${strategy.holdStockNum}, 手数: ${strategy.lotSize}, 期权: ${strategy.openOptionsQuantity}`)
-    lines.push(`    累计收益: 期权 ${strategy.allOptionsIncome.toFixed(2)}, 总计 ${strategy.allIncome.toFixed(2)}`)
 
     if (strategy.options.length > 0) {
       lines.push(`    期权持仓:`)

@@ -32,13 +32,7 @@ export interface StrategySummary {
   optionsGamma: number
   optionsTheta: number
   openOptionsQuantity: number // 未平仓期权合约数
-  openOptionsCallQuantity: number
-  openOptionsPutQuantity: number
   avgDelta: number // 策略平均每股Delta
-  totalFee: number
-  allOptionsIncome: number // 期权总收益(已扣除手续费)
-  allIncome: number // 策略所有交易总收益
-  unrealizedOptionsIncome: number
   holdStockNum: number // 持有股票数
   holdStockCost: number // 持有股票成本价
   holdStockProfit: number
@@ -62,12 +56,13 @@ export interface Order {
   groupId: string
   tradeFrom: string
   subOrder: boolean
-  ext: {
+  isOpen?: string // 是否未平仓（期权订单特有，值为"未平仓"或"已平仓"）
+  groupTotalIncome?: number // 分组累计收益（多腿期权策略才有）
+  groupTotalOrderFee?: number // 分组累计手续费（多腿期权策略才有）
+  ext?: {
     lotSize?: string
     lastSyncStatus?: string
-    isClose?: string // "true" for closed orders
     codeType?: string // "PUT", "CALL", "STOCK"
-    totalIncome?: string
     curDTE?: string // Current DTE, can be negative for expired
     strikePrice?: string
     isPut?: string
@@ -119,8 +114,6 @@ export interface StrategyStatus {
   optionsTheta: number
   openOptionsQuantity: number
   options: OptionPosition[]
-  allOptionsIncome: number
-  allIncome: number
 }
 
 // Stop loss alert
