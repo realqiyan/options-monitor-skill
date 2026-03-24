@@ -204,20 +204,8 @@ export function buildOptionPositionFromOrder(
   order: StrategyDetailResponse['orders'][0],
   orderGroups?: Record<string, { totalIncome: number; totalOrderFee: number; orderCount: number }>
 ): OptionPosition | null {
-  // Only show currently held positions (未平仓)
-  // For Roll orders: closed positions are skipped, new positions are shown
-  if (order.isOpen !== '未平仓') {
-    return null
-  }
-
-  // Skip stock orders
-  if (order.ext?.codeType === 'STOCK') {
-    return null
-  }
-
-  // Side: 1=buy, 2=sell, 3=sell to open, 4=buy to close
-  // For simplicity: 2 or 3 = SELL (sell to open), 1 or 4 = BUY
-  const direction = order.side === 2 || order.side === 3 ? 'SELL' : 'BUY'
+  // Side: 卖出/卖空=SELL, 买入/买回=BUY
+  const direction = order.side === '卖出' || order.side === '卖空' ? 'SELL' : 'BUY'
 
   // Calculate cost price: prefer groupTotalIncome (multi-leg strategies), fallback to orderGroups
   const avgPrice = order.groupTotalIncome != null
@@ -266,13 +254,22 @@ export function buildStrategyStatus(
 
   // Build option positions from strategy's open orders
   const options: OptionPosition[] = []
-  const seenCodes = new Set<string>()
+  const codeToOrder = new Map<string, typeof detail.orders[0]>()
 
+  // First, collect all open option orders, preferring SELL orders for same code
   for (const order of detail.orders ?? []) {
-    // Skip already seen codes (deduplicate)
-    if (seenCodes.has(order.code)) continue
-    seenCodes.add(order.code)
+    if (order.isOpen !== '未平仓') continue
+    if (order.ext?.codeType === 'STOCK') continue
 
+    const existing = codeToOrder.get(order.code)
+    // Prefer SELL orders over BUY orders for the same code
+    if (!existing || order.side === '卖出' || order.side === '卖空') {
+      codeToOrder.set(order.code, order)
+    }
+  }
+
+  // Build option positions from collected orders
+  for (const order of codeToOrder.values()) {
     const optPos = buildOptionPositionFromOrder(order, detail.orderGroups)
     if (optPos) {
       options.push(optPos)

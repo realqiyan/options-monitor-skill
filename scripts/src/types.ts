@@ -46,7 +46,7 @@ export interface StrategySummary {
 export interface Order {
   code: string // 证券代码
   market: number // 市场代码
-  side: number // 订单方向
+  side: string // 订单方向：买入、卖出、卖空、买回
   price: number
   quantity: number
   orderFee: number

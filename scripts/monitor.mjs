@@ -350,13 +350,7 @@ function checkStopLoss(strategyId, strategyName, position) {
   return null;
 }
 function buildOptionPositionFromOrder(order, orderGroups) {
-  if (order.isOpen !== "\u672A\u5E73\u4ED3") {
-    return null;
-  }
-  if (order.ext?.codeType === "STOCK") {
-    return null;
-  }
-  const direction = order.side === 2 || order.side === 3 ? "SELL" : "BUY";
+  const direction = order.side === "\u5356\u51FA" || order.side === "\u5356\u7A7A" ? "SELL" : "BUY";
   const avgPrice = order.groupTotalIncome != null ? Math.abs(order.groupTotalIncome) / (order.quantity * 100) : orderGroups?.[order.groupId] ? Math.abs(orderGroups[order.groupId].totalIncome) / (order.quantity * 100) : order.price;
   const isCall = order.ext?.codeType === "CALL";
   const isPut = order.ext?.codeType === "PUT" || order.ext?.isPut === "true";
@@ -386,11 +380,18 @@ function buildStrategyStatus(strategy, detail) {
   const summary = detail.summary;
   const strategyData = detail.data ?? strategy;
   const options = [];
-  const seenCodes = /* @__PURE__ */ new Set();
+  const codeToOrder = /* @__PURE__ */ new Map();
   for (const order of detail.orders ?? []) {
-    if (seenCodes.has(order.code))
+    if (order.isOpen !== "\u672A\u5E73\u4ED3")
       continue;
-    seenCodes.add(order.code);
+    if (order.ext?.codeType === "STOCK")
+      continue;
+    const existing = codeToOrder.get(order.code);
+    if (!existing || order.side === "\u5356\u51FA" || order.side === "\u5356\u7A7A") {
+      codeToOrder.set(order.code, order);
+    }
+  }
+  for (const order of codeToOrder.values()) {
     const optPos = buildOptionPositionFromOrder(order, detail.orderGroups);
     if (optPos) {
       options.push(optPos);
