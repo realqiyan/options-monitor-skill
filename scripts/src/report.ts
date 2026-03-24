@@ -260,13 +260,13 @@ export function buildStrategyStatus(
   detail: StrategyDetailResponse
 ): StrategyStatus {
   const summary = detail.summary
-  const strategyData = detail.data
+  const strategyData = detail.data ?? strategy
 
   // Build option positions from strategy's open orders
   const options: OptionPosition[] = []
   const seenCodes = new Set<string>()
 
-  for (const order of detail.orders) {
+  for (const order of detail.orders ?? []) {
     // Skip already seen codes (deduplicate)
     if (seenCodes.has(order.code)) continue
     seenCodes.add(order.code)
@@ -282,16 +282,16 @@ export function buildStrategyStatus(
     strategyName: strategyData.strategyName,
     strategyCode: strategyData.strategyCode,
     stockCode: strategyData.code,
-    stockPrice: summary.currentStockPrice,
-    holdStockNum: summary.holdStockNum,
+    stockPrice: summary?.currentStockPrice ?? 0,
+    holdStockNum: summary?.holdStockNum ?? 0,
     lotSize: strategyData.lotSize,
-    normalizedDelta: summary.avgDelta,
-    optionsDelta: summary.optionsDelta,
-    optionsTheta: summary.optionsTheta,
-    openOptionsQuantity: summary.openOptionsQuantity,
+    normalizedDelta: summary?.avgDelta ?? 0,
+    optionsDelta: summary?.optionsDelta ?? 0,
+    optionsTheta: summary?.optionsTheta ?? 0,
+    openOptionsQuantity: summary?.openOptionsQuantity ?? 0,
     options,
-    allOptionsIncome: summary.allOptionsIncome,
-    allIncome: summary.allIncome,
+    allOptionsIncome: summary?.allOptionsIncome ?? 0,
+    allIncome: summary?.allIncome ?? 0,
   }
 }
 

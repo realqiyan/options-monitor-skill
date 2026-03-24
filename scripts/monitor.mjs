@@ -377,10 +377,10 @@ function buildOptionPositionFromOrder(order, orderGroups) {
 }
 function buildStrategyStatus(strategy, detail) {
   const summary = detail.summary;
-  const strategyData = detail.data;
+  const strategyData = detail.data ?? strategy;
   const options = [];
   const seenCodes = /* @__PURE__ */ new Set();
-  for (const order of detail.orders) {
+  for (const order of detail.orders ?? []) {
     if (seenCodes.has(order.code))
       continue;
     seenCodes.add(order.code);
@@ -394,16 +394,16 @@ function buildStrategyStatus(strategy, detail) {
     strategyName: strategyData.strategyName,
     strategyCode: strategyData.strategyCode,
     stockCode: strategyData.code,
-    stockPrice: summary.currentStockPrice,
-    holdStockNum: summary.holdStockNum,
+    stockPrice: summary?.currentStockPrice ?? 0,
+    holdStockNum: summary?.holdStockNum ?? 0,
     lotSize: strategyData.lotSize,
-    normalizedDelta: summary.avgDelta,
-    optionsDelta: summary.optionsDelta,
-    optionsTheta: summary.optionsTheta,
-    openOptionsQuantity: summary.openOptionsQuantity,
+    normalizedDelta: summary?.avgDelta ?? 0,
+    optionsDelta: summary?.optionsDelta ?? 0,
+    optionsTheta: summary?.optionsTheta ?? 0,
+    openOptionsQuantity: summary?.openOptionsQuantity ?? 0,
     options,
-    allOptionsIncome: summary.allOptionsIncome,
-    allIncome: summary.allIncome
+    allOptionsIncome: summary?.allOptionsIncome ?? 0,
+    allIncome: summary?.allIncome ?? 0
   };
 }
 function generateReport(strategies, alerts, adjustmentAlerts, noOptionsPositions, fetchErrors) {
