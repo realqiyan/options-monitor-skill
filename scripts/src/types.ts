@@ -77,6 +77,24 @@ export interface OrderGroup {
   orderCount: number
 }
 
+// Options realtime data from queryOptionsRealtimeData
+export interface OptionsRealtimeData {
+  code: string
+  market: number
+  delta: number
+  gamma: number
+  theta: number
+  vega: number
+  rho: number
+  impliedVolatility: number
+  curPrice: number
+  openInterest: number
+  volume: number
+  timeValue?: number
+  intrinsicValue?: number
+  premium?: number
+}
+
 // Response from queryStrategyDetailAndOrders
 export interface StrategyDetailResponse {
   data: Strategy

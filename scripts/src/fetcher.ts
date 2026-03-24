@@ -5,6 +5,7 @@ import {
   AllStrategyResponse,
   StrategyDetailResponse,
   Strategy,
+  OptionsRealtimeData,
 } from './types.js'
 
 /**
@@ -44,6 +45,21 @@ export async function fetchStrategyDetailAndOrders(
   strategyId: string
 ): Promise<StrategyDetailResponse> {
   return executeMcporter('queryStrategyDetailAndOrders', { strategyId }) as StrategyDetailResponse
+}
+
+/**
+ * Fetch options realtime data (including current price)
+ */
+export async function fetchOptionsRealtimeData(
+  code: string,
+  market: number = 11
+): Promise<OptionsRealtimeData | null> {
+  try {
+    const response = executeMcporter('queryOptionsRealtimeData', { code, market }) as { data: OptionsRealtimeData }
+    return response.data || null
+  } catch {
+    return null
+  }
 }
 
 /**

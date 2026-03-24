@@ -4,6 +4,7 @@
 import {
   fetchAllStrategies,
   fetchStrategyDetailAndOrders,
+  fetchOptionsRealtimeData,
 } from './fetcher.js'
 import {
   buildStrategyStatus,
@@ -13,7 +14,25 @@ import {
   printReportSummary,
 } from './report.js'
 import { checkPositionAdjustments } from './rules.js'
-import { StrategyStatus, StopLossAlert, PositionAdjustmentAlert } from './types.js'
+import { StrategyStatus, StopLossAlert, PositionAdjustmentAlert, OptionPosition } from './types.js'
+
+/**
+ * Update option prices with realtime data
+ */
+async function updateOptionRealtimePrices(options: OptionPosition[]): Promise<void> {
+  for (const option of options) {
+    try {
+      const realtimeData = await fetchOptionsRealtimeData(option.code)
+      if (realtimeData && realtimeData.curPrice > 0) {
+        option.currentPrice = realtimeData.curPrice
+        option.delta = realtimeData.delta
+        option.theta = realtimeData.theta
+      }
+    } catch {
+      // Keep the original price if realtime fetch fails
+    }
+  }
+}
 
 /**
  * Main monitoring function
@@ -42,6 +61,12 @@ async function monitor(): Promise<void> {
       try {
         const detail = await fetchStrategyDetailAndOrders(strategy.strategyId)
         const status = buildStrategyStatus(strategy, detail)
+
+        // Update option prices with realtime data
+        if (status.options.length > 0) {
+          await updateOptionRealtimePrices(status.options)
+        }
+
         strategies.push(status)
 
         // Check for stop loss alerts on options

@@ -23,6 +23,14 @@ async function fetchAllStrategies() {
 async function fetchStrategyDetailAndOrders(strategyId) {
   return executeMcporter("queryStrategyDetailAndOrders", { strategyId });
 }
+async function fetchOptionsRealtimeData(code, market = 11) {
+  try {
+    const response = executeMcporter("queryOptionsRealtimeData", { code, market });
+    return response.data || null;
+  } catch {
+    return null;
+  }
+}
 
 // src/report.ts
 import { writeFileSync, mkdirSync, existsSync } from "fs";
@@ -513,6 +521,19 @@ function printReportSummary(report) {
 }
 
 // src/index.ts
+async function updateOptionRealtimePrices(options) {
+  for (const option of options) {
+    try {
+      const realtimeData = await fetchOptionsRealtimeData(option.code);
+      if (realtimeData && realtimeData.curPrice > 0) {
+        option.currentPrice = realtimeData.curPrice;
+        option.delta = realtimeData.delta;
+        option.theta = realtimeData.theta;
+      }
+    } catch {
+    }
+  }
+}
 async function monitor() {
   const strategies = [];
   const alerts = [];
@@ -531,6 +552,9 @@ async function monitor() {
       try {
         const detail = await fetchStrategyDetailAndOrders(strategy.strategyId);
         const status = buildStrategyStatus(strategy, detail);
+        if (status.options.length > 0) {
+          await updateOptionRealtimePrices(status.options);
+        }
         strategies.push(status);
         for (const option of status.options) {
           const alert = checkStopLoss(
