@@ -46,129 +46,6 @@ var STOP_LOSS_THRESHOLDS = {
 };
 
 // src/rules.ts
-function analyzeCCStrategyDelta(currentDelta, minDTE) {
-  const WEEKS_3_DAYS = 21;
-  if (minDTE <= WEEKS_3_DAYS) {
-    if (currentDelta > 0.25 && currentDelta < 0.75) {
-      const targetDelta = currentDelta > 0.5 ? currentDelta - 0.1 : currentDelta + 0.1;
-      return {
-        strategyCode: "cc_strategy",
-        currentDelta,
-        targetDelta: Math.round(targetDelta * 100) / 100,
-        needsAdjustment: true,
-        reason: `DTE=${minDTE}\u5929<=3\u5468\uFF0C\u9700\u8C03\u6574delta\u54110.5\u9760\u8FD1`
-      };
-    }
-  }
-  if (currentDelta >= 0.75) {
-    return {
-      strategyCode: "cc_strategy",
-      currentDelta,
-      targetDelta: 0.5,
-      needsAdjustment: true,
-      reason: `Delta=${currentDelta.toFixed(2)}>=0.75\uFF0C\u9700\u5411\u4E0B\u8C03\u6574\u81F30.5`
-    };
-  }
-  if (currentDelta <= 0.25) {
-    const targetDelta = Math.max(currentDelta + 0.1, 0.35);
-    return {
-      strategyCode: "cc_strategy",
-      currentDelta,
-      targetDelta: Math.round(targetDelta * 100) / 100,
-      needsAdjustment: true,
-      reason: `Delta=${currentDelta.toFixed(2)}<=0.25\uFF0C\u9700\u5411\u4E0A\u8C03\u6574\u81F3${targetDelta.toFixed(2)}`
-    };
-  }
-  if (minDTE <= WEEKS_3_DAYS) {
-    return {
-      strategyCode: "cc_strategy",
-      currentDelta,
-      targetDelta: null,
-      needsAdjustment: true,
-      reason: `DTE=${minDTE}\u5929<=3\u5468\uFF0C\u9700\u8003\u8651\u5C55\u671F`
-    };
-  }
-  return {
-    strategyCode: "cc_strategy",
-    currentDelta,
-    targetDelta: null,
-    needsAdjustment: false,
-    reason: `Delta\u5728\u6B63\u5E38\u533A\u95F4(0.25-0.75)`
-  };
-}
-function analyzeWheelStrategyDelta(currentDelta, holdStockNum) {
-  if (holdStockNum === 0) {
-    if (currentDelta > 0.35) {
-      return {
-        strategyCode: "wheel_strategy",
-        currentDelta,
-        targetDelta: null,
-        needsAdjustment: false,
-        reason: `\u5F53\u524D\u6301\u80A1=0\uFF0C\u5F00\u4ED3\u5356Put\u5EFA\u8BAEDelta 0.10-0.35`
-      };
-    }
-  } else {
-    return {
-      strategyCode: "wheel_strategy",
-      currentDelta,
-      targetDelta: null,
-      needsAdjustment: false,
-      reason: `\u6301\u6709\u80A1\u7968${holdStockNum}\u80A1\uFF0C\u5356Call\u7B56\u7565`
-    };
-  }
-  return {
-    strategyCode: "wheel_strategy",
-    currentDelta,
-    targetDelta: null,
-    needsAdjustment: false,
-    reason: `Delta\u5728\u6B63\u5E38\u72B6\u6001`
-  };
-}
-function analyzeDefaultStrategyDelta(currentDelta) {
-  if (currentDelta < 0.15) {
-    return {
-      strategyCode: "default",
-      currentDelta,
-      targetDelta: null,
-      needsAdjustment: false,
-      reason: `Delta=${currentDelta.toFixed(2)}<0.15\uFF0C\u5356\u671F\u6743\u5EFA\u8BAEDelta 0.15-0.35`
-    };
-  }
-  if (currentDelta > 0.35) {
-    return {
-      strategyCode: "default",
-      currentDelta,
-      targetDelta: null,
-      needsAdjustment: false,
-      reason: `Delta=${currentDelta.toFixed(2)}>0.35\uFF0C\u5356\u671F\u6743\u5EFA\u8BAEDelta 0.15-0.35`
-    };
-  }
-  return {
-    strategyCode: "default",
-    currentDelta,
-    targetDelta: null,
-    needsAdjustment: false,
-    reason: `Delta\u5728\u6B63\u5E38\u533A\u95F4(0.15-0.35)`
-  };
-}
-function analyzeDeltaForStrategy(strategyCode, normalizedDelta, minDTE, holdStockNum) {
-  switch (strategyCode) {
-    case "cc_strategy":
-      return analyzeCCStrategyDelta(normalizedDelta, minDTE);
-    case "wheel_strategy":
-      return analyzeWheelStrategyDelta(normalizedDelta, holdStockNum);
-    case "default":
-      return analyzeDefaultStrategyDelta(normalizedDelta);
-    default:
-      return {
-        strategyCode,
-        currentDelta: normalizedDelta,
-        targetDelta: null,
-        needsAdjustment: false,
-        reason: `\u672A\u77E5\u7B56\u7565\u7C7B\u578B`
-      };
-  }
-}
 function calculatePnL(option) {
   if (option.costPrice <= 0)
     return 0;
@@ -254,11 +131,6 @@ function checkPositionAdjustments(strategyId, strategyName, strategyCode, status
       return [];
   }
 }
-function getMinDTE(options) {
-  if (options.length === 0)
-    return 999;
-  return Math.min(...options.map((o) => o.dte));
-}
 
 // src/report.ts
 var __filename = fileURLToPath(import.meta.url);
@@ -274,51 +146,72 @@ function isITM2(option, stockPrice) {
     return stockPrice < option.strikePrice;
   }
 }
-function calculatePnL2(option) {
-  if (option.costPrice <= 0)
-    return 0;
-  if (option.direction === "SELL") {
-    return (option.costPrice - option.currentPrice) / option.costPrice * 100;
-  } else {
-    return (option.currentPrice - option.costPrice) / option.costPrice * 100;
-  }
-}
-function generateOptionDiagnostics(option, stockPrice) {
-  const tips = [];
-  const pnl = calculatePnL2(option);
-  const pnlSign = pnl >= 0 ? "+" : "";
-  const itm = isITM2(option, stockPrice);
-  const itmStatus = itm ? "\u4EF7\u5185(ITM)" : "\u4EF7\u5916(OTM)";
-  tips.push(`\u{1F4C8} \u76C8\u4E8F: ${pnlSign}${pnl.toFixed(1)}% | ${itmStatus}`);
-  if (option.dte <= 3) {
-    tips.push(`\u23F0 DTE=${option.dte}\uFF0C\u671F\u6743\u5373\u5C06\u5230\u671F\uFF0C\u9700\u7ACB\u5373\u5904\u7406`);
-  } else if (option.dte <= 7) {
-    tips.push(`\u23F0 DTE=${option.dte}\uFF0C\u671F\u6743\u5373\u5C06\u5230\u671F\uFF0C\u8003\u8651\u5E73\u4ED3\u6216\u5C55\u671F`);
-  }
-  if (option.direction === "SELL" && itm) {
-    tips.push(`\u26A0\uFE0F \u5356\u51FA\u671F\u6743\u5DF2\u4EF7\u5185\uFF0C\u5B58\u5728\u88AB\u884C\u6743\u98CE\u9669`);
-  }
-  return tips;
-}
-function getDeltaAnalysisMessage(strategyCode, normalizedDelta, minDTE, holdStockNum) {
-  const analysis = analyzeDeltaForStrategy(strategyCode, normalizedDelta, minDTE, holdStockNum);
-  if (analysis.needsAdjustment || analysis.reason) {
-    return `\u{1F4A1} ${analysis.reason}`;
-  }
-  return null;
-}
 function calculateDTE(strikeTime) {
   const expiration = new Date(strikeTime);
   const now = /* @__PURE__ */ new Date();
   const diffMs = expiration.getTime() - now.getTime();
   return Math.max(0, Math.ceil(diffMs / (1e3 * 60 * 60 * 24)));
 }
-function checkStopLoss(strategyId, strategyName, position) {
+function calculatePortfolioPnL(holdStockNum, holdStockCost, stockPrice, options) {
+  const stockCost = holdStockCost * holdStockNum;
+  const stockValue = stockPrice * holdStockNum;
+  const stockPnL = stockValue - stockCost;
+  const stockPnLPercent = stockCost > 0 ? stockPnL / stockCost * 100 : 0;
+  let optionPnL = 0;
+  for (const opt of options) {
+    if (opt.direction === "SELL") {
+      optionPnL += (opt.costPrice - opt.currentPrice) * opt.contracts * 100;
+    } else {
+      optionPnL += (opt.currentPrice - opt.costPrice) * opt.contracts * 100;
+    }
+  }
+  const totalCost = stockCost > 0 ? stockCost : 1;
+  const totalPnL = stockPnL + optionPnL;
+  const totalPnLPercent = totalPnL / totalCost * 100;
+  return {
+    stockPnL,
+    stockPnLPercent,
+    optionPnL,
+    totalPnL,
+    totalPnLPercent
+  };
+}
+function assessRiskLevel(strategyCode, holdStockNum, options, stockPrice, portfolioPnL) {
+  if (holdStockNum === 0) {
+    const soldPut = options.find((o) => o.direction === "SELL" && !o.isCall);
+    if (soldPut && isITM2(soldPut, stockPrice)) {
+      return { level: "HIGH", reason: "\u5356Put\u4EF7\u5185(ITM)\uFF0C\u5B58\u5728\u88AB\u6307\u6D3E\u63A5\u80A1\u98CE\u9669" };
+    }
+  }
+  if (portfolioPnL && portfolioPnL.totalPnLPercent < -20) {
+    return { level: "HIGH", reason: `\u7EC4\u5408\u4E8F\u635F${portfolioPnL.totalPnLPercent.toFixed(1)}%\uFF0C\u8D85\u8FC720%\u9608\u503C` };
+  }
+  const minDTE = options.length > 0 ? Math.min(...options.map((o) => o.dte)) : 999;
+  if (minDTE <= 7) {
+    return { level: "MEDIUM", reason: `\u671F\u6743\u5373\u5C06\u5230\u671F(DTE=${minDTE}\u5929)` };
+  }
+  if (holdStockNum > 0 && strategyCode === "wheel_strategy") {
+    const soldCall = options.find((o) => o.direction === "SELL" && o.isCall);
+    if (soldCall) {
+      if (portfolioPnL && portfolioPnL.totalPnL > 0) {
+        return { level: "LOW", reason: "\u5BF9\u51B2\u7B56\u7565\u6B63\u5E38\u8FD0\u884C\uFF0C\u7EC4\u5408\u76C8\u5229" };
+      }
+      if (!isITM2(soldCall, stockPrice)) {
+        return { level: "LOW", reason: "\u5BF9\u51B2\u7B56\u7565\u6B63\u5E38\u8FD0\u884C\uFF0C\u5356Call\u4EF7\u5916" };
+      }
+    }
+  }
+  return { level: "LOW", reason: "\u7B56\u7565\u72B6\u6001\u6B63\u5E38" };
+}
+function checkStopLoss(strategyId, strategyName, strategyCode, position, holdStockNum) {
   const { direction, currentPrice, costPrice, code } = position;
   if (costPrice <= 0 || currentPrice <= 0) {
     return null;
   }
   const changePercent = (currentPrice - costPrice) / costPrice * 100;
+  if (direction === "SELL" && position.isCall && holdStockNum > 0) {
+    return null;
+  }
   if (direction === "BUY") {
     if (changePercent <= -STOP_LOSS_THRESHOLDS.BUY_OPTION_LOSS_PERCENT) {
       return {
@@ -413,9 +306,32 @@ function buildStrategyStatus(strategy, detail) {
   };
 }
 function generateReport(strategies, alerts, adjustmentAlerts, noOptionsPositions, fetchErrors) {
+  const strategiesWithRisk = strategies.map((status) => {
+    const portfolioPnL = calculatePortfolioPnL(
+      status.holdStockNum,
+      0,
+      // holdStockCost 暂时不可用
+      status.stockPrice,
+      status.options
+    );
+    const risk = assessRiskLevel(
+      status.strategyCode,
+      status.holdStockNum,
+      status.options,
+      status.stockPrice,
+      portfolioPnL
+    );
+    return {
+      status,
+      riskLevel: risk.level,
+      riskReason: risk.reason,
+      portfolioPnL
+    };
+  });
   return {
     generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
     strategies,
+    strategiesWithRisk,
     alerts,
     adjustmentAlerts,
     noOptionsPositions,
@@ -439,54 +355,50 @@ function formatReportAsText(report) {
       lines.push(`    ${alert.message}`);
     }
   }
-  lines.push(`
-\u{1F4CA} \u9700\u8981Agent\u7EE7\u7EED\u5206\u6790\u7684${report.strategies.length}\u4E2A\u671F\u6743\u4EA4\u6613\u7B56\u7565:`);
-  for (const strategy of report.strategies) {
-    const minDTE = getMinDTE(strategy.options);
-    const analysis = analyzeDeltaForStrategy(
-      strategy.strategyCode,
-      strategy.normalizedDelta,
-      minDTE,
-      strategy.holdStockNum
-    );
-    const hasAdjustmentAlert = report.adjustmentAlerts.some(
-      (a) => a.strategyId === strategy.strategyId
-    );
-    const hasNearExpiration = strategy.options.some((o) => o.dte <= 7);
-    const hasITMSoldOption = strategy.options.some(
-      (o) => o.direction === "SELL" && isITM2(o, strategy.stockPrice)
-    );
-    const needsAttention = analysis.needsAdjustment || hasAdjustmentAlert || hasNearExpiration || hasITMSoldOption;
-    const statusIcon = needsAttention ? "\u26A0\uFE0F" : "\u2705";
-    const statusText = needsAttention ? "\u5173\u6CE8" : "\u6B63\u5E38";
+  const highRisk = report.strategiesWithRisk.filter((s) => s.riskLevel === "HIGH");
+  const mediumRisk = report.strategiesWithRisk.filter((s) => s.riskLevel === "MEDIUM");
+  const lowRisk = report.strategiesWithRisk.filter((s) => s.riskLevel === "LOW");
+  if (highRisk.length > 0) {
     lines.push(`
-  ${strategy.strategyName} (${strategy.strategyCode}) [${statusIcon} ${statusText}]`);
-    lines.push(`    \u7B56\u7565ID: ${strategy.strategyId}`);
-    lines.push(`    \u6807\u7684: ${strategy.stockCode} @ ${strategy.stockPrice.toFixed(2)}`);
-    lines.push(`    Delta: \u7B56\u7565 ${strategy.normalizedDelta.toFixed(2)}, \u671F\u6743 ${strategy.optionsDelta.toFixed(2)}`);
-    const deltaMsg = getDeltaAnalysisMessage(
-      strategy.strategyCode,
-      strategy.normalizedDelta,
-      minDTE,
-      strategy.holdStockNum
-    );
-    if (deltaMsg) {
-      lines.push(`    ${deltaMsg}`);
-    }
-    lines.push(`    Theta: ${strategy.optionsTheta.toFixed(4)}`);
-    lines.push(`    \u6301\u80A1: ${strategy.holdStockNum}, \u624B\u6570: ${strategy.lotSize}, \u671F\u6743: ${strategy.openOptionsQuantity}`);
-    if (strategy.options.length > 0) {
-      lines.push(`    \u671F\u6743\u6301\u4ED3:`);
-      for (const opt of strategy.options) {
-        const direction = opt.direction === "SELL" ? "\u5356" : "\u4E70";
-        const type = opt.isCall ? "Call" : "Put";
-        lines.push(`      ${opt.code} (${direction}${type}) x${opt.contracts}`);
-        lines.push(`        \u884C\u6743\u4EF7: ${opt.strikePrice} | DTE: ${opt.dte} | \u6210\u672C: ${opt.costPrice} | \u73B0\u4EF7: ${opt.currentPrice}`);
-        const diagnostics = generateOptionDiagnostics(opt, strategy.stockPrice);
-        for (const tip of diagnostics) {
-          lines.push(`        ${tip}`);
+\u{1F534} \u9AD8\u98CE\u9669 (${highRisk.length}\u4E2A):`);
+    for (const item of highRisk) {
+      const strategy = item.status;
+      lines.push(`  ${strategy.strategyName} (${strategy.strategyCode})`);
+      lines.push(`    \u7B56\u7565ID: ${strategy.strategyId}`);
+      lines.push(`    \u6807\u7684: ${strategy.stockCode} @ ${strategy.stockPrice.toFixed(2)}`);
+      lines.push(`    \u98CE\u9669\u539F\u56E0: ${item.riskReason}`);
+      if (item.portfolioPnL) {
+        lines.push(`    \u7EC4\u5408\u76C8\u4E8F: $${item.portfolioPnL.totalPnL.toFixed(0)} (${item.portfolioPnL.totalPnLPercent.toFixed(1)}%)`);
+      }
+      lines.push(`    \u5EFA\u8BAE: \u9700\u8981\u7ACB\u5373\u5904\u7406`);
+      if (strategy.options.length > 0) {
+        lines.push(`    \u671F\u6743\u6301\u4ED3:`);
+        for (const opt of strategy.options) {
+          const direction = opt.direction === "SELL" ? "\u5356" : "\u4E70";
+          const type = opt.isCall ? "Call" : "Put";
+          lines.push(`      ${opt.code} (${direction}${type}) x${opt.contracts}, \u884C\u6743\u4EF7${opt.strikePrice}, DTE=${opt.dte}`);
         }
       }
+    }
+  }
+  if (mediumRisk.length > 0) {
+    lines.push(`
+\u{1F7E1} \u4E2D\u98CE\u9669 (${mediumRisk.length}\u4E2A):`);
+    for (const item of mediumRisk) {
+      const strategy = item.status;
+      lines.push(`  ${strategy.strategyName} - ${item.riskReason}`);
+      if (item.portfolioPnL) {
+        lines.push(`    \u7EC4\u5408\u76C8\u4E8F: $${item.portfolioPnL.totalPnL.toFixed(0)} (${item.portfolioPnL.totalPnLPercent.toFixed(1)}%)`);
+      }
+    }
+  }
+  if (lowRisk.length > 0) {
+    lines.push(`
+\u{1F7E2} \u4F4E\u98CE\u9669 (${lowRisk.length}\u4E2A):`);
+    for (const item of lowRisk) {
+      const strategy = item.status;
+      const pnlStr = item.portfolioPnL ? `, \u7EC4\u5408\u76C8\u4E8F$${item.portfolioPnL.totalPnL.toFixed(0)}` : "";
+      lines.push(`  ${strategy.strategyName} - ${item.riskReason}${pnlStr}`);
     }
   }
   if (report.noOptionsPositions.length > 0) {
@@ -561,7 +473,9 @@ async function monitor() {
           const alert = checkStopLoss(
             strategy.strategyId,
             strategy.strategyName,
-            option
+            status.strategyCode,
+            option,
+            status.holdStockNum
           );
           if (alert) {
             alerts.push(alert);

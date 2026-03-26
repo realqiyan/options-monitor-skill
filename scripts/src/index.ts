@@ -70,11 +70,14 @@ async function monitor(): Promise<void> {
         strategies.push(status)
 
         // Check for stop loss alerts on options
+        // 新增：传入策略类型和持股数，用于判断对冲策略
         for (const option of status.options) {
           const alert = checkStopLoss(
             strategy.strategyId,
             strategy.strategyName,
-            option
+            status.strategyCode,
+            option,
+            status.holdStockNum
           )
           if (alert) {
             alerts.push(alert)

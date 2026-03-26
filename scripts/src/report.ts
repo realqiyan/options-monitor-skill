@@ -12,6 +12,9 @@ import {
   StrategyDetailResponse,
   PositionAdjustmentAlert,
   STOP_LOSS_THRESHOLDS,
+  RiskLevel,
+  PortfolioPnL,
+  StrategyWithRisk,
 } from './types.js'
 import {
   analyzeDeltaForStrategy,
@@ -145,13 +148,106 @@ export function calculateDTE(strikeTime: string): number {
 }
 
 /**
+ * Calculate portfolio PnL (stock + options)
+ * 组合盈亏计算：股票盈亏 + 期权盈亏
+ */
+export function calculatePortfolioPnL(
+  holdStockNum: number,
+  holdStockCost: number,
+  stockPrice: number,
+  options: OptionPosition[]
+): PortfolioPnL {
+  // 股票盈亏 = (现价 - 成本价) × 持股数
+  const stockCost = holdStockCost * holdStockNum
+  const stockValue = stockPrice * holdStockNum
+  const stockPnL = stockValue - stockCost
+  const stockPnLPercent = stockCost > 0 ? (stockPnL / stockCost) * 100 : 0
+
+  // 期权盈亏 = 对每个期权计算
+  let optionPnL = 0
+  for (const opt of options) {
+    if (opt.direction === 'SELL') {
+      // 卖期权：权利金收入 - 回购成本
+      optionPnL += (opt.costPrice - opt.currentPrice) * opt.contracts * 100
+    } else {
+      // 买期权：现值 - 成本
+      optionPnL += (opt.currentPrice - opt.costPrice) * opt.contracts * 100
+    }
+  }
+
+  // 组合总盈亏
+  const totalCost = stockCost > 0 ? stockCost : 1 // 避免除以0
+  const totalPnL = stockPnL + optionPnL
+  const totalPnLPercent = (totalPnL / totalCost) * 100
+
+  return {
+    stockPnL,
+    stockPnLPercent,
+    optionPnL,
+    totalPnL,
+    totalPnLPercent,
+  }
+}
+
+/**
+ * Assess risk level for a strategy
+ * 三级风险评估：高风险/中风险/低风险
+ */
+export function assessRiskLevel(
+  strategyCode: string,
+  holdStockNum: number,
+  options: OptionPosition[],
+  stockPrice: number,
+  portfolioPnL?: PortfolioPnL
+): { level: RiskLevel; reason: string } {
+  // 1. 检查单边卖Put ITM（高风险）
+  if (holdStockNum === 0) {
+    const soldPut = options.find(o => o.direction === 'SELL' && !o.isCall)
+    if (soldPut && isITM(soldPut, stockPrice)) {
+      return { level: 'HIGH', reason: '卖Put价内(ITM)，存在被指派接股风险' }
+    }
+  }
+
+  // 2. 检查组合盈亏
+  if (portfolioPnL && portfolioPnL.totalPnLPercent < -20) {
+    return { level: 'HIGH', reason: `组合亏损${portfolioPnL.totalPnLPercent.toFixed(1)}%，超过20%阈值` }
+  }
+
+  // 3. 检查DTE紧迫性（中风险）
+  const minDTE = options.length > 0 ? Math.min(...options.map(o => o.dte)) : 999
+  if (minDTE <= 7) {
+    return { level: 'MEDIUM', reason: `期权即将到期(DTE=${minDTE}天)` }
+  }
+
+  // 4. 检查对冲策略
+  if (holdStockNum > 0 && strategyCode === 'wheel_strategy') {
+    const soldCall = options.find(o => o.direction === 'SELL' && o.isCall)
+    if (soldCall) {
+      if (portfolioPnL && portfolioPnL.totalPnL > 0) {
+        return { level: 'LOW', reason: '对冲策略正常运行，组合盈利' }
+      }
+      if (!isITM(soldCall, stockPrice)) {
+        return { level: 'LOW', reason: '对冲策略正常运行，卖Call价外' }
+      }
+    }
+  }
+
+  // 5. 默认低风险
+  return { level: 'LOW', reason: '策略状态正常' }
+}
+
+/**
  * Check stop loss for an option position
  * Returns alert if triggered, null otherwise
+ * 
+ * 新增：对冲策略（持股+卖Call）豁免止损告警
  */
 export function checkStopLoss(
   strategyId: string,
   strategyName: string,
-  position: OptionPosition
+  strategyCode: string,
+  position: OptionPosition,
+  holdStockNum: number
 ): StopLossAlert | null {
   const { direction, currentPrice, costPrice, code } = position
 
@@ -160,6 +256,13 @@ export function checkStopLoss(
   }
 
   const changePercent = ((currentPrice - costPrice) / costPrice) * 100
+
+  // 新增：对冲策略豁免止损告警
+  // Wheel策略/CC策略：持股+卖Call = 对冲，不单独评估期权端止损
+  if (direction === 'SELL' && position.isCall && holdStockNum > 0) {
+    // 对冲策略的卖Call，不触发止损告警
+    return null
+  }
 
   // Buy option: loss if price drops significantly
   if (direction === 'BUY') {
@@ -302,9 +405,33 @@ export function generateReport(
   noOptionsPositions: string[],
   fetchErrors: string[]
 ): MonitoringReport {
+  // 计算每个策略的风险等级
+  const strategiesWithRisk: StrategyWithRisk[] = strategies.map(status => {
+    const portfolioPnL = calculatePortfolioPnL(
+      status.holdStockNum,
+      0, // holdStockCost 暂时不可用
+      status.stockPrice,
+      status.options
+    )
+    const risk = assessRiskLevel(
+      status.strategyCode,
+      status.holdStockNum,
+      status.options,
+      status.stockPrice,
+      portfolioPnL
+    )
+    return {
+      status,
+      riskLevel: risk.level,
+      riskReason: risk.reason,
+      portfolioPnL,
+    }
+  })
+
   return {
     generatedAt: new Date().toISOString(),
     strategies,
+    strategiesWithRisk,
     alerts,
     adjustmentAlerts,
     noOptionsPositions,
@@ -314,6 +441,7 @@ export function generateReport(
 
 /**
  * Format report as text (same as console output)
+ * 优化：按风险等级分组输出
  */
 export function formatReportAsText(report: MonitoringReport): string {
   const lines: string[] = []
@@ -337,71 +465,57 @@ export function formatReportAsText(report: MonitoringReport): string {
     }
   }
 
-  // Print strategies
-  lines.push(`\n📊 需要Agent继续分析的${report.strategies.length}个期权交易策略:`)
-  for (const strategy of report.strategies) {
-    // Get adjustment status
-    const minDTE = getMinDTE(strategy.options)
-    const analysis = analyzeDeltaForStrategy(
-      strategy.strategyCode,
-      strategy.normalizedDelta,
-      minDTE,
-      strategy.holdStockNum
-    )
+  // 按风险等级分组
+  const highRisk = report.strategiesWithRisk.filter(s => s.riskLevel === 'HIGH')
+  const mediumRisk = report.strategiesWithRisk.filter(s => s.riskLevel === 'MEDIUM')
+  const lowRisk = report.strategiesWithRisk.filter(s => s.riskLevel === 'LOW')
 
-    // Check if strategy needs attention
-    // 1. Delta needs adjustment
-    // 2. Has adjustment alerts (assignment risk, expiration warning, etc.)
-    // 3. Has options near expiration (DTE <= 7)
-    // 4. Has ITM sold options (assignment risk)
-    const hasAdjustmentAlert = report.adjustmentAlerts.some(
-      a => a.strategyId === strategy.strategyId
-    )
-    const hasNearExpiration = strategy.options.some(o => o.dte <= 7)
-    const hasITMSoldOption = strategy.options.some(
-      o => o.direction === 'SELL' && isITM(o, strategy.stockPrice)
-    )
-
-    const needsAttention = analysis.needsAdjustment ||
-      hasAdjustmentAlert ||
-      hasNearExpiration ||
-      hasITMSoldOption
-
-    const statusIcon = needsAttention ? '⚠️' : '✅'
-    const statusText = needsAttention ? '关注' : '正常'
-
-    lines.push(`\n  ${strategy.strategyName} (${strategy.strategyCode}) [${statusIcon} ${statusText}]`)
-    lines.push(`    策略ID: ${strategy.strategyId}`)
-    lines.push(`    标的: ${strategy.stockCode} @ ${strategy.stockPrice.toFixed(2)}`)
-    lines.push(`    Delta: 策略 ${strategy.normalizedDelta.toFixed(2)}, 期权 ${strategy.optionsDelta.toFixed(2)}`)
-
-    // Delta analysis with rules
-    const deltaMsg = getDeltaAnalysisMessage(
-      strategy.strategyCode,
-      strategy.normalizedDelta,
-      minDTE,
-      strategy.holdStockNum
-    )
-    if (deltaMsg) {
-      lines.push(`    ${deltaMsg}`)
-    }
-
-    lines.push(`    Theta: ${strategy.optionsTheta.toFixed(4)}`)
-    lines.push(`    持股: ${strategy.holdStockNum}, 手数: ${strategy.lotSize}, 期权: ${strategy.openOptionsQuantity}`)
-
-    if (strategy.options.length > 0) {
-      lines.push(`    期权持仓:`)
-      for (const opt of strategy.options) {
-        const direction = opt.direction === 'SELL' ? '卖' : '买'
-        const type = opt.isCall ? 'Call' : 'Put'
-        lines.push(`      ${opt.code} (${direction}${type}) x${opt.contracts}`)
-        lines.push(`        行权价: ${opt.strikePrice} | DTE: ${opt.dte} | 成本: ${opt.costPrice} | 现价: ${opt.currentPrice}`)
-        // Add diagnostic tips
-        const diagnostics = generateOptionDiagnostics(opt, strategy.stockPrice)
-        for (const tip of diagnostics) {
-          lines.push(`        ${tip}`)
+  // 高风险策略
+  if (highRisk.length > 0) {
+    lines.push(`\n🔴 高风险 (${highRisk.length}个):`)
+    for (const item of highRisk) {
+      const strategy = item.status
+      lines.push(`  ${strategy.strategyName} (${strategy.strategyCode})`)
+      lines.push(`    策略ID: ${strategy.strategyId}`)
+      lines.push(`    标的: ${strategy.stockCode} @ ${strategy.stockPrice.toFixed(2)}`)
+      lines.push(`    风险原因: ${item.riskReason}`)
+      if (item.portfolioPnL) {
+        lines.push(`    组合盈亏: $${item.portfolioPnL.totalPnL.toFixed(0)} (${item.portfolioPnL.totalPnLPercent.toFixed(1)}%)`)
+      }
+      lines.push(`    建议: 需要立即处理`)
+      // 输出期权持仓
+      if (strategy.options.length > 0) {
+        lines.push(`    期权持仓:`)
+        for (const opt of strategy.options) {
+          const direction = opt.direction === 'SELL' ? '卖' : '买'
+          const type = opt.isCall ? 'Call' : 'Put'
+          lines.push(`      ${opt.code} (${direction}${type}) x${opt.contracts}, 行权价${opt.strikePrice}, DTE=${opt.dte}`)
         }
       }
+    }
+  }
+
+  // 中风险策略
+  if (mediumRisk.length > 0) {
+    lines.push(`\n🟡 中风险 (${mediumRisk.length}个):`)
+    for (const item of mediumRisk) {
+      const strategy = item.status
+      lines.push(`  ${strategy.strategyName} - ${item.riskReason}`)
+      if (item.portfolioPnL) {
+        lines.push(`    组合盈亏: $${item.portfolioPnL.totalPnL.toFixed(0)} (${item.portfolioPnL.totalPnLPercent.toFixed(1)}%)`)
+      }
+    }
+  }
+
+  // 低风险策略（折叠显示）
+  if (lowRisk.length > 0) {
+    lines.push(`\n🟢 低风险 (${lowRisk.length}个):`)
+    for (const item of lowRisk) {
+      const strategy = item.status
+      const pnlStr = item.portfolioPnL 
+        ? `, 组合盈亏$${item.portfolioPnL.totalPnL.toFixed(0)}`
+        : ''
+      lines.push(`  ${strategy.strategyName} - ${item.riskReason}${pnlStr}`)
     }
   }
 

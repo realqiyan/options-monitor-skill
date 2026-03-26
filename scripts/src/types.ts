@@ -178,10 +178,31 @@ export interface PositionAdjustmentAlert {
   details: Record<string, unknown>
 }
 
+// Risk level for strategy assessment
+export type RiskLevel = 'HIGH' | 'MEDIUM' | 'LOW'
+
+// Portfolio PnL calculation result
+export interface PortfolioPnL {
+  stockPnL: number           // 股票盈亏（美元）
+  stockPnLPercent: number    // 股票盈亏百分比
+  optionPnL: number          // 期权盈亏（美元）
+  totalPnL: number           // 组合总盈亏（美元）
+  totalPnLPercent: number    // 组合总盈亏百分比
+}
+
+// Strategy with risk assessment
+export interface StrategyWithRisk {
+  status: StrategyStatus
+  riskLevel: RiskLevel
+  riskReason: string
+  portfolioPnL?: PortfolioPnL
+}
+
 // Monitoring report output
 export interface MonitoringReport {
   generatedAt: string
   strategies: StrategyStatus[]
+  strategiesWithRisk: StrategyWithRisk[]
   alerts: StopLossAlert[]
   adjustmentAlerts: PositionAdjustmentAlert[]
   noOptionsPositions: string[]
