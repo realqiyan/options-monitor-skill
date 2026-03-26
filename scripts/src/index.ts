@@ -1,129 +1,188 @@
 #!/usr/bin/env node
-// Main entry point for options-monitor
+// Options Monitor - Main Entry Point
 
-import {
-  fetchAllStrategies,
-  fetchStrategyDetailAndOrders,
-  fetchOptionsRealtimeData,
-} from './fetcher.js'
-import {
-  buildStrategyStatus,
-  checkStopLoss,
-  generateReport,
-  writeReportToFile,
-  printReportSummary,
-} from './report.js'
-import { checkPositionAdjustments } from './rules.js'
-import { StrategyStatus, StopLossAlert, PositionAdjustmentAlert, OptionPosition } from './types.js'
+import { writeFileSync, mkdirSync, existsSync } from 'fs'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
+import { fetchAllStrategies, fetchOptionsRealtimePrices } from './api.js'
+import { assessStrategyRisk } from './risk.js'
+import { MonitorReport, StrategyRiskReport, RollContext } from './types.js'
 
-/**
- * Update option prices with realtime data
- */
-async function updateOptionRealtimePrices(options: OptionPosition[]): Promise<void> {
-  for (const option of options) {
-    try {
-      const realtimeData = await fetchOptionsRealtimeData(option.code)
-      if (realtimeData && realtimeData.curPrice > 0) {
-        option.currentPrice = realtimeData.curPrice
-        option.delta = realtimeData.delta
-        option.theta = realtimeData.theta
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+const OUTPUT_DIR = join(__dirname, '..', 'output')
+
+// ============================================
+// Report Formatting
+// ============================================
+
+function formatReport(report: MonitorReport): string {
+  const lines: string[] = []
+
+  lines.push(`## 期权持仓风险报告`)
+  lines.push(`生成时间: ${report.generatedAt}`)
+  lines.push('')
+
+  // Group by risk level
+  const highRisk = report.strategies.filter(s => s.risk.level === 'HIGH')
+  const mediumRisk = report.strategies.filter(s => s.risk.level === 'MEDIUM')
+  const lowRisk = report.strategies.filter(s => s.risk.level === 'LOW')
+
+  // Collect all roll operations
+  const allRolls: Array<{ name: string; roll: RollContext }> = []
+  for (const s of report.strategies) {
+    for (const roll of s.rollOperations) {
+      if (roll.daysSinceRoll <= 30) { // Only show rolls within 30 days
+        allRolls.push({ name: s.strategyName, roll })
       }
-    } catch {
-      // Keep the original price if realtime fetch fails
     }
   }
+
+  // High risk
+  if (highRisk.length > 0) {
+    lines.push(`### 🔴 高风险 (${highRisk.length}个)`)
+    for (const s of highRisk) {
+      lines.push('')
+      lines.push(`**${s.strategyName}** (${s.strategyCode})`)
+      lines.push(`- 策略ID: ${s.strategyId}`)
+      lines.push(`- 标的: ${s.stockCode} @ $${s.stockPrice.toFixed(2)}`)
+      lines.push(`- 持股: ${s.holdStockNum}股`)
+      lines.push(`- 风险原因: ${s.risk.reasons.join(', ')}`)
+      lines.push(`- 组合盈亏: $${s.totalPnL.toFixed(0)}`)
+
+      if (s.positions.length > 0) {
+        lines.push(`- 期权持仓:`)
+        for (const pos of s.positions) {
+          const dir = pos.direction === 'SELL' ? '卖' : '买'
+          const pnlStr = pos.pnl >= 0 ? `+$${pos.pnl.toFixed(0)}` : `-$${Math.abs(pos.pnl).toFixed(0)}`
+          lines.push(`  - ${pos.code} ${dir}${pos.type} x${pos.quantity}, 行权价$${pos.strikePrice}, DTE=${pos.dte}, 盈亏${pnlStr}`)
+        }
+      }
+      lines.push('---')
+    }
+  }
+
+  // Medium risk
+  if (mediumRisk.length > 0) {
+    lines.push(`### 🟡 中风险 (${mediumRisk.length}个)`)
+    for (const s of mediumRisk) {
+      lines.push('')
+      lines.push(`**${s.strategyName}** (${s.strategyCode})`)
+      lines.push(`- 策略ID: ${s.strategyId}`)
+      lines.push(`- 风险原因: ${s.risk.reasons.join(', ')}`)
+      lines.push(`- 组合盈亏: $${s.totalPnL.toFixed(0)}`)
+    }
+    lines.push('---')
+  }
+
+  // Low risk
+  if (lowRisk.length > 0) {
+    lines.push(`### 🟢 低风险 (${lowRisk.length}个)`)
+    for (const s of lowRisk) {
+      const pnlStr = s.totalPnL >= 0 ? `+$${s.totalPnL.toFixed(0)}` : `-$${Math.abs(s.totalPnL).toFixed(0)}`
+      lines.push(`- ${s.strategyName}: ${s.risk.reasons.join(', ')}, 盈亏${pnlStr}`)
+    }
+  }
+
+  // Roll operations
+  if (allRolls.length > 0) {
+    lines.push('')
+    lines.push(`### 🔄 近期展期操作 (${allRolls.length}个)`)
+    for (const { name, roll } of allRolls) {
+      const incomeStr = roll.totalIncome >= 0
+        ? `+$${roll.totalIncome}`
+        : `-$${Math.abs(roll.totalIncome)}`
+      lines.push(`- ${name}: ${roll.closedCode} → ${roll.openedCode}, 收益${incomeStr} (${roll.daysSinceRoll}天前)`)
+    }
+  }
+
+  return lines.join('\n')
 }
 
-/**
- * Main monitoring function
- */
+// ============================================
+// Main Monitor Function
+// ============================================
+
 async function monitor(): Promise<void> {
-  const strategies: StrategyStatus[] = []
-  const alerts: StopLossAlert[] = []
-  const adjustmentAlerts: PositionAdjustmentAlert[] = []
-  const noOptionsPositions: string[] = []
-  const fetchErrors: string[] = []
+  console.log('开始监控期权持仓...\n')
+
+  const reports: StrategyRiskReport[] = []
 
   try {
     // Fetch all strategies
     const allStrategies = await fetchAllStrategies()
 
-    // Filter strategies with auto_trade enabled
+    // Filter auto-trade strategies
     const autoTradeStrategies = allStrategies.filter(
-      s => s.ext?.auto_trade === "true"
+      s => s.ext?.auto_trade === 'true'
     )
+
     console.log(`找到 ${allStrategies.length} 个策略，其中 ${autoTradeStrategies.length} 个开启自动交易\n`)
 
-    // Process each auto-trade strategy
+    // Process each strategy
     for (const strategy of autoTradeStrategies) {
       console.log(`处理策略: ${strategy.strategyName}...`)
 
       try {
-        const detail = await fetchStrategyDetailAndOrders(strategy.strategyId)
-        const status = buildStrategyStatus(strategy, detail)
+        // Fetch strategy detail
+        const detail = await fetchAllStrategies().then(strategies =>
+          // Need to re-fetch detail, using a direct call
+          import('./api.js').then(api => api.fetchStrategyDetail(strategy.strategyId))
+        )
 
-        // Update option prices with realtime data
-        if (status.options.length > 0) {
-          await updateOptionRealtimePrices(status.options)
-        }
-
-        strategies.push(status)
-
-        // Check for stop loss alerts on options
-        // 新增：传入策略类型和持股数，用于判断对冲策略
-        for (const option of status.options) {
-          const alert = checkStopLoss(
-            strategy.strategyId,
-            strategy.strategyName,
-            status.strategyCode,
-            option,
-            status.holdStockNum
-          )
-          if (alert) {
-            alerts.push(alert)
+        // Collect option codes
+        const optionCodes: string[] = []
+        for (const order of detail.orders || []) {
+          if (order.isOpen === '未平仓' && order.ext?.codeType !== 'STOCK') {
+            optionCodes.push(order.code)
           }
         }
 
-        // Check for position adjustment alerts
-        const positionAlerts = checkPositionAdjustments(
-          strategy.strategyId,
-          strategy.strategyName,
-          status.strategyCode,
-          status
-        )
-        adjustmentAlerts.push(...positionAlerts)
+        // Fetch realtime prices
+        const realtimeData = await fetchOptionsRealtimePrices(optionCodes)
 
-        // Check if no open options
-        if (status.openOptionsQuantity === 0 && status.options.length === 0) {
-          noOptionsPositions.push(strategy.strategyId)
-        }
+        // Assess risk
+        const report = assessStrategyRisk(detail, realtimeData)
+        reports.push(report)
+
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        fetchErrors.push(`获取策略 ${strategy.strategyName} 详情失败: ${message}`)
+        console.error(`  错误: ${error}`)
       }
     }
+
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    fetchErrors.push(`获取策略列表失败: ${message}`)
+    console.error(`获取策略列表失败: ${error}`)
+    process.exit(1)
   }
 
-  // Generate and output report
-  const report = generateReport(strategies, alerts, adjustmentAlerts, noOptionsPositions, fetchErrors)
+  // Build and output report
+  const report: MonitorReport = {
+    generatedAt: new Date().toLocaleString('zh-CN'),
+    strategies: reports,
+  }
+
+  const output = formatReport(report)
 
   // Write to file
-  writeReportToFile(report)
+  if (!existsSync(OUTPUT_DIR)) {
+    mkdirSync(OUTPUT_DIR, { recursive: true })
+  }
+  const outputFile = join(OUTPUT_DIR, 'latest-report.txt')
+  writeFileSync(outputFile, output, 'utf-8')
 
-  // Print summary to console
-  printReportSummary(report)
+  // Print to console
+  console.log('\n' + output)
+  console.log(`\n报告已保存至: ${outputFile}`)
 
-  // Exit with error code if there are alerts or errors
-  if (alerts.length > 0) {
+  // Exit with error if high risk
+  const hasHighRisk = reports.some(r => r.risk.level === 'HIGH')
+  if (hasHighRisk) {
     process.exit(1)
   }
 }
 
-// Run monitor
-monitor().catch((error) => {
+// Run
+monitor().catch(error => {
   console.error('监控执行失败:', error)
   process.exit(1)
 })
